@@ -35,7 +35,11 @@ else if (_c is not null)
                     <span>Confidence <span class="meter"><span style="width:@(((_c.Confidence ?? 0) * 100).ToString("F0"))%"></span></span> @Display.Pct(_c.Confidence)</span>
                 </div>
             </div>
-            <div class="actions">
+            <div class="actions" style="align-items:center">
+                @if (AssessedSteps.Count < 5)
+                {
+                    <span class="small muted">@(5 - AssessedSteps.Count) step(s) not assessed yet</span>
+                }
                 <button class="btn btn-danger" disabled="@_busy" @onclick="@(() => DecideAsync("Phishing"))">Confirm phishing</button>
                 <button class="btn btn-ok" disabled="@_busy" @onclick="@(() => DecideAsync("Benign"))">Mark benign</button>
                 <button class="btn" disabled="@_busy" @onclick="RerunAsync">Re-run investigation</button>
@@ -53,9 +57,24 @@ else if (_c is not null)
     <div class="split" style="margin-top:16px">
         <div class="stack">
             <div class="card">
-                <h2>Investigation checklist</h2>
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px">
+                    <h2 style="margin:0">Investigation checklist</h2>
+                    <div class="progress-line small muted" title="Evidence steps assessed so far">
+                        @for (var n = 1; n <= 5; n++)
+                        {
+                            <span class="progress-dot @(AssessedSteps.Contains(n) ? "done" : "")"></span>
+                        }
+                        <span>@AssessedSteps.Count of 5 done</span>
+                    </div>
+                </div>
                 <div class="steps">
-                    @foreach (var s in _c.Steps)
+                    @foreach (var s in _c.Steps.Where(s => s.Step <= 5))
+                    {
+                        <StepAssessment @key="s.Step" Step="s" Case="_c" Analyst="@Analyst.Name"
+                                        Waiting="@IsWaiting(s)" Locked="@IsLocked(s)"
+                                        StartOpen="@(s.Step == FirstOpenStep)" OnSaved="OnStepSavedAsync" />
+                    }
+                    @foreach (var s in _c.Steps.Where(s => s.Step > 5))
                     {
                         <div class="step lvl-@s.Level">
                             <div class="step-num">@s.Step</div>
@@ -231,6 +250,29 @@ else if (_c is not null)
         approve ? "Notice marked as filed (simulated; nothing was sent)." : "Notice rejected.");
 
     private void Toggle(long id) { if (!_open.Remove(id)) _open.Add(id); }
+
+    // Summaries the API uses for a step nobody has assessed yet (older cases may still carry the earlier wording).
+    private static readonly HashSet<string> WaitingSummaries =
+        ["Waiting for analyst assessment", "Not implemented yet", "Not investigated yet"];
+
+    /// <summary>Neither an analyst nor an automated step has assessed this step yet.</summary>
+    private static bool IsWaiting(StepDto s) => s.RecordedBy is null && s.Level == "Unknown" && WaitingSummaries.Contains(s.Summary);
+
+    /// <summary>Steps open in order: a waiting step stays locked while an earlier step is still waiting.</summary>
+    private bool IsLocked(StepDto s) => IsWaiting(s) && (_c?.Steps.Any(o => o.Step < s.Step && IsWaiting(o)) ?? false);
+
+    /// <summary>Evidence steps (1–5) that are done, by an analyst or by automation.</summary>
+    private HashSet<int> AssessedSteps => _c?.Steps.Where(s => s.Step <= 5 && !IsWaiting(s)).Select(s => s.Step).ToHashSet() ?? [];
+
+    /// <summary>Open the first step nobody has assessed yet, so the analyst can work top to bottom.</summary>
+    private int FirstOpenStep => Enumerable.Range(1, 5).FirstOrDefault(n => !AssessedSteps.Contains(n));
+
+    private async Task OnStepSavedAsync(string message)
+    {
+        _message = message;
+        _error = null;
+        await LoadAsync();
+    }
 
     private static string Age(DateTime? created) => created is { } c ? $"({(DateTime.UtcNow - c).TotalDays:N0} days ago)" : "";
 }

@@ -23,7 +23,8 @@ public record EvidenceDto(
     DateTime? SandboxRunAtUtc, bool? SandboxAcceptsAnyCredentials, bool? SandboxPostsToExternalHost, string? SandboxPostTarget,
     bool? SandboxRedirectsToBrand, float? BrandPageSimilarity);
 
-public record StepDto(int Step, string Name, string Level, double Points, string Summary, List<string> Details);
+public record StepDto(int Step, string Name, string Level, double Points, string Summary, List<string> Details,
+    string? RecordedBy = null, DateTime? RecordedAtUtc = null);
 
 public record UrlRowDto(long UrlId, string Url, string? ExpandedUrl, float Probability, string Band, DateTime IngestedAtUtc);
 

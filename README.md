@@ -184,13 +184,26 @@ Every case the Scoring worker creates (Gray → `AgentReview`, or auto-`Confirme
   blocked as a whole.
 - Set `Investigation:Enabled = false` on every machine except the one that runs the shared worker.
 
+### Manual step-by-step assessment
+
+Until steps 1–5 are automated, analysts can perform them in the console. On the case page each of steps 1–5 shows
+**what to check** (the stakeholders' procedure), **the evidence for that step** (domain and brand, WHOIS, page
+snapshot, sandbox result, certificate) and an assessment: *Benign / Suspicious / Malicious / Not sure* with notes.
+Steps open in order: a step that is still waiting shows what it is about and "Opens once step N is saved", and unlocks when the previous step is saved. A progress bar shows how many of the 5 are done.
+
+- `POST /api/cases/{id}/steps/{1-5}` with `{ "level": "Malicious", "analyst": "...", "notes": "..." }` stores the
+  assessment in the case's audit trail (`AgentRuns`, with `RecordedBy`). An analyst's assessment of a step takes
+  precedence over any automated step for that case and adds points to the verdict
+  (Malicious +2.5, Suspicious +1, Benign −1.5, Not sure 0).
+- **Confirm phishing** then runs the usual database operations: analyst decision, case Confirmed / Phishing,
+  draft takedown notices and block-list indicators. **Mark benign** dismisses the case and removes its indicators.
 ### Analyst console (PhishGuard.Web)
 
 | Screen | What analysts do there |
 |---|---|
 | **Dashboard** `/` | Funnel from URLs scored → flagged → cases → needs analyst → takedown filed; cases by status; top brands |
 | **Review queue** `/cases` | Cases waiting for an analyst (tabs: investigating, confirmed, takedown filed, dismissed, all); search by domain |
-| **Case** `/cases/{id}` | The 7-step checklist with findings, domain evidence and sandbox results, campaign URLs (short links expanded), takedown notices, decision history; **Confirm phishing**, **Mark benign**, **Re-run investigation** |
+| **Case** `/cases/{id}` | The 7-step checklist with findings and **manual assessment of steps 1–5**, domain evidence and sandbox results, campaign URLs (short links expanded), takedown notices, decision history; **Confirm phishing**, **Mark benign**, **Re-run investigation** |
 | **Takedown notices** `/enforcement` | Preview, **Approve & file** (simulated) or reject drafted notices |
 | **Block-list** `/indicators` | Indicators from confirmed cases; **Download CSV** |
 | **Dataset** `/dataset` | Synthetic dataset by category |

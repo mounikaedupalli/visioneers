@@ -1,0 +1,201 @@
+@using System.Globalization
+@inject PhishGuardApiClient Api
+
+<div class="step lvl-@Step.Level @(Locked ? "locked" : "")">
+    <div class="step-num">@Step.Step</div>
+    <div>
+        <h3>@Step.Name</h3>
+        @if (Waiting)
+        {
+            <div>@About(Step.Step)</div>
+            <div class="recorded">
+                @(Locked ? $"Opens once step {Step.Step - 1} is saved." : _open ? "Assess this step below." : "Ready to assess.")
+            </div>
+        }
+        else
+        {
+            <div>@Step.Summary</div>
+        }
+        @if (Step.RecordedBy is not null)
+        {
+            <div class="recorded">Assessed by @Step.RecordedBy @(Step.RecordedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "")</div>
+        }
+        @if (!Waiting && Step.Details.Count > 0)
+        {
+            <ul>@foreach (var d in Step.Details) { <li>@d</li> }</ul>
+        }
+
+        @if (_open && !Locked)
+        {
+            <div class="step-body">
+                <div class="guide">
+                    <h4>What to check</h4>
+                    <ul>@foreach (var g in Guidance(Step.Step)) { <li>@g</li> }</ul>
+                </div>
+                <div class="evidence">
+                    <h4>Evidence for this step</h4>
+                    <dl class="kv">
+                        @foreach (var (k, v) in Evidence(Step.Step))
+                        {
+                            <dt>@k</dt><dd class="@(k.StartsWith("URL") || k.StartsWith("Domain") ? "mono" : "")">@v</dd>
+                        }
+                    </dl>
+                </div>
+                <div>
+                    <h4 class="muted small" style="margin:0 0 6px">Your assessment</h4>
+                    <div class="segmented">
+                        @foreach (var (level, label) in Levels)
+                        {
+                            <button class="@(_level == level ? "sel-" + level : "")" @onclick="@(() => _level = level)">@label</button>
+                        }
+                    </div>
+                </div>
+                <textarea class="text" placeholder="What did you find? (one point per line)" @bind="_notes"></textarea>
+                <div class="actions">
+                    <button class="btn btn-primary" disabled="@(_busy || _level is null)" @onclick="SaveAsync">Save step @Step.Step</button>
+                    <button class="btn" @onclick="() => _open = false">Cancel</button>
+                    @if (_error is not null) { <span class="small" style="color:var(--bad)">@_error</span> }
+                </div>
+            </div>
+        }
+    </div>
+    <div style="text-align:right">
+        <Badge Text="@(Waiting ? (Locked ? "Locked" : "To do") : Step.Level)" Css="@(Waiting ? (Locked ? "b-neutral" : "b-info") : Display.LevelClass(Step.Level))" />
+        @if (Step.Points != 0)
+        {
+            <div class="points" style="margin-top:6px">@Step.Points.ToString("+0.0;-0.0") pts</div>
+        }
+        @if (!_open && !Locked)
+        {
+            <div style="margin-top:8px">
+                <button class="btn btn-sm" @onclick="Open">@(Step.RecordedBy is null ? "Assess" : "Change")</button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public StepDto Step { get; set; } = default!;
+    [Parameter, EditorRequired] public CaseDetailDto Case { get; set; } = default!;
+    [Parameter, EditorRequired] public string Analyst { get; set; } = "";
+    [Parameter] public bool StartOpen { get; set; }
+    /// <summary>Nobody (analyst or automation) has assessed this step yet.</summary>
+    [Parameter] public bool Waiting { get; set; }
+    /// <summary>Waiting, and an earlier step still needs assessing: steps open in order.</summary>
+    [Parameter] public bool Locked { get; set; }
+    [Parameter] public EventCallback<string> OnSaved { get; set; }
+
+    private static readonly (string Level, string Label)[] Levels =
+        [("Benign", "Benign"), ("Suspicious", "Suspicious"), ("Malicious", "Malicious"), ("Unknown", "Not sure")];
+
+    private bool _open, _busy, _initialised, _lastStartOpen;
+    private string? _level, _notes, _error;
+
+    protected override void OnParametersSet()
+    {
+        // Open when this becomes the next step to assess (e.g. right after the previous one was saved).
+        if (StartOpen && !_lastStartOpen) _open = true;
+        _lastStartOpen = StartOpen;
+
+        if (_initialised) return;
+        _initialised = true;
+        if (Step.RecordedBy is not null) { _level = Step.Level; _notes = string.Join("\n", Step.Details); }
+    }
+
+    private void Open() { _open = true; _error = null; }
+
+    private async Task SaveAsync()
+    {
+        _busy = true; _error = null;
+        try
+        {
+            await Api.AssessStepAsync(Case.Id, Step.Step, _level!, Analyst, _notes);
+            _open = false;
+            await OnSaved.InvokeAsync($"Step {Step.Step} saved as {(_level == "Unknown" ? "not sure" : _level!.ToLowerInvariant())}.");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    /// <summary>One line on what each step is about, shown while it waits to be assessed.</summary>
+    private static string About(int step) => step switch
+    {
+        1 => "Check the domain name for typosquatting, character swaps and brand spoofing.",
+        2 => "Check the domain's registration age, registrar and hosting provider.",
+        3 => "Check the page snapshot for a cloned brand page or a phishing kit.",
+        4 => "Check what happened when the sandbox entered dummy credentials.",
+        5 => "Check the SSL/TLS certificate's issuer and details.",
+        _ => ""
+    };
+
+    /// <summary>The stakeholders' procedure for each step, shown next to the evidence.</summary>
+    private static string[] Guidance(int step) => step switch
+    {
+        1 => ["Check the domain name thoroughly for typosquatting, character swaps or deceptive brand spoofing (e.g. apple.com vs applle.com).",
+              "Compare the Unicode form with the punycode form: look-alike letters only show in one of them.",
+              "Is the brand in the registered domain, or only in a subdomain or the path of someone else's site?"],
+        2 => ["Look up domain registration details (WHOIS / RDAP): how recently was it registered, and with which registrar?",
+              "Review the hosting provider and country for suspicious infrastructure."],
+        3 => ["Inspect the page snapshot: is it a clone of the brand's page, or a kit built to collect personal or confidential data?",
+              "Look for the brand's logo, a login form and similarity to the genuine page."],
+        4 => ["Dummy-input test: did the form accept made-up credentials, and where did it send them?",
+              "Smart kits log the data and then silently forward the victim to the genuine site to avoid suspicion.",
+              "Use the sandbox result only. Never open the link or type into it from your own machine."],
+        5 => ["Verify the certificate's issuing authority and details.",
+              "Many phishing sites use free automated certificate authorities (e.g. Let's Encrypt) to look secure; that alone isn't proof."],
+        _ => []
+    };
+
+    private IEnumerable<(string, string)> Evidence(int step)
+    {
+        var e = Case.Evidence;
+        var domain = Case.Campaign.RegisteredDomain;
+        switch (step)
+        {
+            case 1:
+                yield return ("Domain (punycode)", Display.Defang(domain));
+                var unicode = ToUnicode(domain);
+                if (unicode != domain) yield return ("Domain (as displayed)", Display.Defang(unicode));
+                yield return ("Kit path", Case.Campaign.PathPattern ?? "/");
+                yield return ("Brand it relates to", Case.Campaign.Brand ?? "none detected");
+                foreach (var (u, i) in Case.Urls.Take(3).Select((u, i) => (u, i)))
+                    yield return ($"URL example {i + 1}", Display.Defang(u.ExpandedUrl ?? u.Url) + (u.ExpandedUrl is not null ? "  (via short link)" : ""));
+                break;
+            case 2:
+                if (e is null) { yield return ("WHOIS", "No record for this domain"); break; }
+                yield return ("Registered", e.CreatedOnUtc is { } c ? $"{c:yyyy-MM-dd} ({(DateTime.UtcNow - c).TotalDays:N0} days ago)" : "unknown");
+                yield return ("Registrar", e.Registrar ?? "unknown");
+                yield return ("Privacy protected", e.PrivacyProtected ? "Yes" : "No");
+                yield return ("Hosting", $"{e.HostingProvider ?? "unknown"} ({e.RegistrantCountry ?? "?"})");
+                break;
+            case 3:
+                if (e is null) { yield return ("Page snapshot", "None available"); break; }
+                yield return ("Page title", e.PageTitle ?? "—");
+                yield return ("Login form", e.HasLoginForm ? "Yes" : "No");
+                yield return ("Brand logo", e.BrandLogoDetected ? "Detected" : "Not detected");
+                yield return ("Similarity to brand page", Display.Pct(e.BrandPageSimilarity));
+                yield return ("Screenshot", e.ScreenshotRef ?? "—");
+                break;
+            case 4:
+                if (e?.SandboxRunAtUtc is null) { yield return ("Sandbox", "Not run for this domain"); break; }
+                yield return ("Sandbox run", e.SandboxRunAtUtc.Value.ToString("yyyy-MM-dd HH:mm"));
+                yield return ("Accepted fake login", Display.YesNo(e.SandboxAcceptsAnyCredentials));
+                yield return ("Posted data elsewhere", Display.YesNo(e.SandboxPostsToExternalHost) + (e.SandboxPostTarget is null ? "" : $"  → {e.SandboxPostTarget}"));
+                yield return ("Forwarded to the real site", Display.YesNo(e.SandboxRedirectsToBrand));
+                break;
+            case 5:
+                var https = Case.Urls.Count(u => (u.ExpandedUrl ?? u.Url).StartsWith("https", StringComparison.OrdinalIgnoreCase));
+                yield return ("HTTPS", $"{https} of {Case.Urls.Count} URLs");
+                if (e is null) break;
+                yield return ("Issuer", e.CertIssuer ?? "unknown");
+                yield return ("Issued", e.CertIssuedOnUtc is { } issued ? $"{issued:yyyy-MM-dd} ({(DateTime.UtcNow - issued).TotalDays:N0} days ago)" : "unknown");
+                break;
+        }
+    }
+
+    private static string ToUnicode(string domain)
+    {
+        try { return new IdnMapping().GetUnicode(domain); }
+        catch (ArgumentException) { return domain; }
+    }
+}
