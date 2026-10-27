@@ -4,13 +4,17 @@ using Microsoft.ML;
 namespace PhishGuard.Ml;
 
 /// <summary>Everything Scoring needs to know about a trained model, saved next to model.zip as model.json.</summary>
+/// <param name="FeatureCount">URL features the model was trained with; Scoring refuses a model whose count differs.</param>
+/// <param name="UsesEvidence">Whether the model also expects domain-evidence features.</param>
 public sealed record ModelMetadata(
     string Version,
     DateTime TrainedAtUtc,
     BandPolicy Bands,
     int TrainRows,
     int TestRows,
-    Dictionary<string, double> Metrics);
+    Dictionary<string, double> Metrics,
+    int FeatureCount = 0,
+    bool UsesEvidence = false);
 
 public static class ModelStore
 {

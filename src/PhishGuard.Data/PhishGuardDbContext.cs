@@ -8,6 +8,7 @@ public class PhishGuardDbContext(DbContextOptions<PhishGuardDbContext> options) 
     public DbSet<ProtectedBrand> Brands => Set<ProtectedBrand>();
     public DbSet<UrlRecord> Urls => Set<UrlRecord>();
     public DbSet<DomainEvidence> DomainEvidence => Set<DomainEvidence>();
+    public DbSet<ShortLink> ShortLinks => Set<ShortLink>();
     public DbSet<UrlScore> Scores => Set<UrlScore>();
     public DbSet<Campaign> Campaigns => Set<Campaign>();
     public DbSet<PhishCase> Cases => Set<PhishCase>();
@@ -54,6 +55,14 @@ public class PhishGuardDbContext(DbContextOptions<PhishGuardDbContext> options) 
             e.Property(x => x.CertIssuer).HasMaxLength(200);
             e.Property(x => x.PageTitle).HasMaxLength(500);
             e.Property(x => x.ScreenshotRef).HasMaxLength(500);
+        });
+
+        b.Entity<ShortLink>(e =>
+        {
+            e.ToTable("ShortLinks");
+            e.HasKey(x => x.ShortUrl);
+            e.Property(x => x.ShortUrl).HasMaxLength(400);
+            e.Property(x => x.ExpandedUrl).HasMaxLength(2048);
         });
 
         b.Entity<UrlScore>(e =>

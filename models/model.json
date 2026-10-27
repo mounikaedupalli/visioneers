@@ -1,21 +1,23 @@
 {
-  "Version": "lgbm-20261023-1543",
-  "TrainedAtUtc": "2026-10-23T15:43:45.4667855Z",
+  "Version": "lgbm-20261027-1527",
+  "TrainedAtUtc": "2026-10-27T15:27:21.2626417Z",
   "Bands": {
     "ClearThreshold": 0.5,
-    "ConfirmThreshold": 0.96586156,
+    "ConfirmThreshold": 0.9,
     "TargetRecall": 0.98,
     "TargetPrecision": 0.995
   },
   "TrainRows": 300000,
   "TestRows": 150000,
   "Metrics": {
-    "recall_new_domains": 0.956392467789891,
-    "pr_auc": 0.9953692227510711,
-    "roc_auc": 0.9998580949365761,
-    "recall": 0.958223162347964,
-    "flagged_fp_rate": 0.009023789991796555,
-    "gray_per_day": 1090,
-    "confirmed_precision": 0.9997181510710259
-  }
+    "recall_new_domains": 0.9521468371025893,
+    "pr_auc": 0.9998641674350349,
+    "roc_auc": 0.999997010830861,
+    "recall": 0.9613960867265997,
+    "flagged_fp_rate": 0,
+    "gray_per_day": 4430,
+    "confirmed_precision": 1
+  },
+  "FeatureCount": 42,
+  "UsesEvidence": true
 }

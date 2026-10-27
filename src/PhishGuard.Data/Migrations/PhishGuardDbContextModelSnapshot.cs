@@ -489,6 +489,25 @@ namespace PhishGuard.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("PhishGuard.Core.Domain.ShortLink", b =>
+                {
+                    b.Property<string>("ShortUrl")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<DateTime>("ExpandedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ExpandedUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.HasKey("ShortUrl");
+
+                    b.ToTable("ShortLinks", (string)null);
+                });
+
             modelBuilder.Entity("PhishGuard.Core.Domain.UrlRecord", b =>
                 {
                     b.Property<long>("Id")

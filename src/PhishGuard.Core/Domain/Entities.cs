@@ -51,6 +51,17 @@ public class DomainEvidence
     public string? ScreenshotRef { get; set; }
 }
 
+/// <summary>
+/// Where a short link really points, as a shortener's expand API would report it (e.g. bit.ly /v4/expand).
+/// Lets the model judge the destination instead of "bit.ly/abc123". Simulated by DataGen; nobody visits the target.
+/// </summary>
+public class ShortLink
+{
+    public required string ShortUrl { get; set; }
+    public required string ExpandedUrl { get; set; }
+    public DateTime ExpandedAtUtc { get; set; }
+}
+
 public class UrlScore
 {
     public long Id { get; set; }

@@ -19,8 +19,12 @@ public sealed record BandPolicy(float ClearThreshold, float ConfirmThreshold, do
     /// Safety cap: never auto-clear a URL the model rates at or above this. Without it, a validation slice the model finds
     /// easy (e.g. repeat campaigns) yields a near-1.0 Clear threshold that silently drops new attacks.
     /// </param>
+    /// <param name="minConfirmThreshold">
+    /// Safety floor: never auto-confirm below this probability. On an easy validation slice precision is 100% at every
+    /// score, which would put Confirmed right at the Clear threshold and leave no Gray band for agents and analysts.
+    /// </param>
     public static BandPolicy Choose(IReadOnlyList<(float Probability, bool IsPhishing)> validation, double targetRecall, double targetPrecision,
-        float maxClearThreshold = 0.5f)
+        float maxClearThreshold = 0.5f, float minConfirmThreshold = 0.9f)
     {
         var phish = validation.Where(v => v.IsPhishing).Select(v => v.Probability).OrderBy(p => p).ToArray();
         if (phish.Length == 0) throw new InvalidOperationException("Validation set has no phishing examples.");
@@ -41,6 +45,6 @@ public sealed record BandPolicy(float ClearThreshold, float ConfirmThreshold, do
             if (precision >= targetPrecision && nextDiffers) confirm = sorted[k].Probability;
         }
 
-        return new BandPolicy(clear, Math.Max(confirm, clear), targetRecall, targetPrecision);
+        return new BandPolicy(clear, Math.Max(Math.Max(confirm, clear), minConfirmThreshold), targetRecall, targetPrecision);
     }
 }

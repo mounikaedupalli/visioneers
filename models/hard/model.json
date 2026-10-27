@@ -1,21 +1,23 @@
 {
-  "Version": "lgbm-20261027-0918",
-  "TrainedAtUtc": "2026-10-27T09:18:43.8624697Z",
+  "Version": "lgbm-20261027-1522",
+  "TrainedAtUtc": "2026-10-27T15:22:47.1582111Z",
   "Bands": {
-    "ClearThreshold": 0.06117115,
-    "ConfirmThreshold": 0.6614374,
+    "ClearThreshold": 0.35250205,
+    "ConfirmThreshold": 0.9,
     "TargetRecall": 0.98,
     "TargetPrecision": 0.995
   },
   "TrainRows": 300000,
   "TestRows": 150000,
   "Metrics": {
-    "recall_new_domains": 0.902638762511374,
-    "pr_auc": 0.989511094762059,
-    "roc_auc": 0.9995921252420699,
-    "recall": 0.898503740648379,
-    "flagged_fp_rate": 0.01718494271685761,
-    "gray_per_day": 2070,
-    "confirmed_precision": 0.9991326973113617
-  }
+    "recall_new_domains": 0.9090909090909091,
+    "pr_auc": 0.9976314419284249,
+    "roc_auc": 0.999901733845595,
+    "recall": 0.9220615964802011,
+    "flagged_fp_rate": 0.0013614703880190605,
+    "gray_per_day": 4840,
+    "confirmed_precision": 0.99974509304104
+  },
+  "FeatureCount": 42,
+  "UsesEvidence": true
 }

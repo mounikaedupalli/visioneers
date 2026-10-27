@@ -374,6 +374,28 @@ BEGIN
     VALUES (N'20261023154553_UniqueScorePerModel', N'9.0.21');
 END;
 
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027144342_AddShortLinks'
+)
+BEGIN
+    CREATE TABLE [ShortLinks] (
+        [ShortUrl] nvarchar(400) NOT NULL,
+        [ExpandedUrl] nvarchar(2048) NOT NULL,
+        [ExpandedAtUtc] datetime2 NOT NULL,
+        CONSTRAINT [PK_ShortLinks] PRIMARY KEY ([ShortUrl])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027144342_AddShortLinks'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261027144342_AddShortLinks', N'9.0.21');
+END;
+
 COMMIT;
 GO
 

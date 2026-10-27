@@ -13,7 +13,7 @@ using PhishGuard.Ml;
 // Trains the Tier-1 model and compares it with a lexical-only baseline (the sponsor's current approach).
 // Usage:
 //   dotnet run --project src/PhishGuard.Training -- [--iterations 300] [--target-recall 0.98]
-//        [--target-precision 0.995] [--out models] [--daily-volume 1500000] [--max-clear 0.5]
+//        [--target-precision 0.995] [--out models] [--daily-volume 1500000] [--max-clear 0.5] [--min-confirm 0.9]
 
 var opts = TrainOptions.Parse(args);
 var config = new ConfigurationBuilder()
@@ -26,18 +26,28 @@ var connectionString = config.GetConnectionString("phishguard")
 var outDir = opts.OutDir ?? ModelStore.DefaultDirectory();
 var sw = Stopwatch.StartNew();
 
-// 1. Load, oldest first
-List<(string Url, bool IsPhishing, UrlCategory Category, string Domain)> rows;
+// 1. Load, oldest first. Short links are judged by their destination ("effective URL"), and every row
+//    carries the evidence of its effective registered domain.
+List<(string Url, bool IsPhishing, UrlCategory Category, string Domain, DateTime SeenAt)> rows;
 List<ProtectedBrand> brands;
-await using (var db = new PhishGuardDbContext(new DbContextOptionsBuilder<PhishGuardDbContext>().UseSqlServer(connectionString).Options))
+Dictionary<string, string> expansions;
+Dictionary<string, DomainEvidence> evidence;
+await using (var db = new PhishGuardDbContext(new DbContextOptionsBuilder<PhishGuardDbContext>().UseSqlServer(connectionString, o => o.CommandTimeout(300)).Options))
 {
     brands = await db.Brands.AsNoTracking().ToListAsync();
+    expansions = await db.ShortLinks.AsNoTracking().ToDictionaryAsync(s => s.ShortUrl, s => s.ExpandedUrl, StringComparer.Ordinal);
+    evidence = await db.DomainEvidence.AsNoTracking().ToDictionaryAsync(e => e.RegisteredDomain, StringComparer.OrdinalIgnoreCase);
     rows = (await db.Urls.AsNoTracking().OrderBy(u => u.IngestedAtUtc).ThenBy(u => u.Id)
-            .Select(u => new { u.Url, u.IsPhishing, u.Category, u.RegisteredDomain }).ToListAsync())
-        .Select(u => (u.Url, u.IsPhishing, u.Category, Domain: u.RegisteredDomain)).ToList();
+            .Select(u => new { u.Url, u.IsPhishing, u.Category, u.RegisteredDomain, u.IngestedAtUtc }).ToListAsync())
+        .Select(u =>
+        {
+            var effective = UrlModelInput.Effective(u.Url, expansions);
+            var domain = effective == u.Url || !UrlParser.TryParse(effective, out var p) ? u.RegisteredDomain : p.RegisteredDomain;
+            return (Url: effective, u.IsPhishing, u.Category, Domain: domain, SeenAt: u.IngestedAtUtc);
+        }).ToList();
 }
 if (rows.Count == 0) { Console.WriteLine("No URLs in the database. Run PhishGuard.DataGen first."); return 1; }
-Console.WriteLine($"Loaded {rows.Count:N0} URLs and {brands.Count} brands in {sw.Elapsed.TotalSeconds:F1}s");
+Console.WriteLine($"Loaded {rows.Count:N0} URLs, {brands.Count} brands, {expansions.Count:N0} short-link expansions, {evidence.Count:N0} evidence records in {sw.Elapsed.TotalSeconds:F1}s");
 
 // 2. Time-based split: fit on the oldest 60%, pick thresholds on the next 10%, test on the newest 30%.
 //    "Emerging" tactics (homoglyph, encoded-long) start late, so they are mostly unseen during fitting.
@@ -55,8 +65,9 @@ if (!policyRows.Any(i => rows[i].IsPhishing)) policyRows = Enumerable.Range(fitE
 // 3. Features
 var extractor = new UrlFeatureExtractor(brands);
 var inputs = new UrlModelInput[rows.Count];
-Parallel.For(0, rows.Count, i => inputs[i] = UrlModelInput.Create(extractor, rows[i].Url, rows[i].IsPhishing));
-Console.WriteLine($"Extracted {UrlFeatureExtractor.Count} features per URL in {sw.Elapsed.TotalSeconds:F1}s");
+Parallel.For(0, rows.Count, i => inputs[i] = UrlModelInput.Create(extractor, rows[i].Url, rows[i].IsPhishing,
+    evidence.GetValueOrDefault(rows[i].Domain), rows[i].SeenAt));
+Console.WriteLine($"Extracted {UrlFeatureExtractor.Count} URL + {EvidenceFeatures.Size} evidence features per URL in {sw.Elapsed.TotalSeconds:F1}s");
 
 var ml = new MLContext(seed: 42);
 var fit = ml.Data.LoadFromEnumerable(inputs[..fitEnd]);
@@ -64,12 +75,13 @@ var validation = ml.Data.LoadFromEnumerable(inputs[fitEnd..valEnd]);
 var test = ml.Data.LoadFromEnumerable(inputs[valEnd..]);
 var testRows = rows[valEnd..];
 
-// 4. Train both models
+// 4. Train the baseline, PhishGuard on the URL alone, and PhishGuard + domain evidence (the one Scoring uses).
 var results = new List<ModelResult>();
 foreach (var (name, pipeline) in new[]
 {
     ("Baseline (URL structure only)", UrlModelPipelines.Baseline(ml, opts.Iterations)),
-    ("PhishGuard (structure + brand + char n-grams)", UrlModelPipelines.Full(ml, opts.Iterations))
+    ("PhishGuard URL-only (structure + brand + char n-grams)", UrlModelPipelines.Full(ml, opts.Iterations, useEvidence: false)),
+    ("PhishGuard + evidence (domain age, certificate, page snapshot)", UrlModelPipelines.Full(ml, opts.Iterations, useEvidence: true))
 })
 {
     var t = Stopwatch.StartNew();
@@ -77,7 +89,7 @@ foreach (var (name, pipeline) in new[]
     var model = pipeline.Fit(fit);
     var valProbs = Probabilities(model.Transform(validation));
     var policy = BandPolicy.Choose(policyRows.Select(i => (valProbs[i - fitEnd], rows[i].IsPhishing)).ToList(),
-        opts.TargetRecall, opts.TargetPrecision, opts.MaxClear);
+        opts.TargetRecall, opts.TargetPrecision, opts.MaxClear, opts.MinConfirm);
     var scoredTest = model.Transform(test);
     var testProbs = Probabilities(scoredTest);
     var eval = ml.BinaryClassification.Evaluate(scoredTest, labelColumnName: nameof(UrlModelInput.Label));
@@ -92,7 +104,7 @@ var testPhish = testRows.Count(r => r.IsPhishing);
 report.AppendLine($"# PhishGuard training report — {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC");
 report.AppendLine();
 report.AppendLine($"Test set: newest {testRows.Count:N0} URLs ({testPhish:N0} phishing). Daily figures scale the test set to {opts.DailyVolume:N0} URLs/day.");
-report.AppendLine($"Thresholds chosen on a separate validation slice (phishing from domains not seen in fitting + all benign) for ≥{opts.TargetRecall:P0} recall (Clear, capped at {opts.MaxClear}) and ≥{opts.TargetPrecision:P1} precision (Confirmed).");
+report.AppendLine($"Thresholds chosen on a separate validation slice (phishing from domains not seen in fitting + all benign) for ≥{opts.TargetRecall:P0} recall (Clear, capped at {opts.MaxClear}) and ≥{opts.TargetPrecision:P1} precision (Confirmed, at least {opts.MinConfirm}).");
 var newDomainPhish = testRows.Count(r => r.IsPhishing && !seenPhishDomains.Contains(r.Domain));
 report.AppendLine($"\"New domains\" = test phishing whose registered domain never appeared as phishing in fitting or validation ({newDomainPhish:N0} URLs).");
 report.AppendLine();
@@ -136,22 +148,24 @@ foreach (var r in results)
 
 var best = results[^1];
 report.AppendLine();
-report.AppendLine($"## Per category — {best.Name}");
-report.AppendLine("Phishing rows: share caught (not Clear). Benign rows: share wrongly flagged.");
+report.AppendLine("## Per category");
+report.AppendLine("Phishing rows: share caught (not Clear). Benign rows: share wrongly flagged. One column per model, same order as above.");
 report.AppendLine();
-report.AppendLine("| Category | Rows in test | Caught / wrongly flagged | Auto-confirmed | Gray |");
-report.AppendLine("|---|---|---|---|---|");
-foreach (var g in testRows.Zip(best.TestProbabilities, (row, p) => (row.Category, row.IsPhishing, Band: best.Policy.Band(p)))
-             .GroupBy(x => x.Category).OrderBy(g => (int)g.Key))
+report.AppendLine($"| Category | Rows in test | {string.Join(" | ", results.Select(r => r.Name.Split(" (")[0]))} | Auto-confirmed ({best.Name.Split(" (")[0]}) |");
+report.AppendLine($"|---|---|{string.Concat(results.Select(_ => "---|"))}---|");
+var categories = testRows.Select((row, i) => (row.Category, Index: i)).GroupBy(x => x.Category).OrderBy(g => (int)g.Key);
+foreach (var g in categories)
 {
-    var n = g.Count();
-    var flagged = g.Count(x => x.Band != ScoreBand.Clear);
-    report.AppendLine($"| {g.Key}{(g.Key is UrlCategory.Homoglyph or UrlCategory.EncodedLongUrl ? " (emerging)" : "")} | {n:N0} | {(double)flagged / n:P1} | {g.Count(x => x.Band == ScoreBand.Confirmed):N0} | {g.Count(x => x.Band == ScoreBand.Gray):N0} |");
+    var idx = g.Select(x => x.Index).ToArray();
+    var cells = results.Select(r => (double)idx.Count(i => r.Policy.Band(r.TestProbabilities[i]) != ScoreBand.Clear) / idx.Length);
+    var confirmed = idx.Count(i => best.Policy.Band(best.TestProbabilities[i]) == ScoreBand.Confirmed);
+    report.AppendLine($"| {g.Key}{(g.Key is UrlCategory.Homoglyph or UrlCategory.EncodedLongUrl ? " (emerging)" : "")} | {idx.Length:N0} | {string.Join(" | ", cells.Select(c => c.ToString("P1")))} | {confirmed:N0} |");
 }
 
 // 6. Save the PhishGuard model for the Scoring worker
 var version = $"lgbm-{DateTime.UtcNow:yyyyMMdd-HHmm}";
-ModelStore.Save(ml, best.Model, fit.Schema, new ModelMetadata(version, DateTime.UtcNow, best.Policy, fitEnd, testRows.Count, best.Metrics), outDir);
+ModelStore.Save(ml, best.Model, fit.Schema, new ModelMetadata(version, DateTime.UtcNow, best.Policy, fitEnd, testRows.Count, best.Metrics,
+    FeatureCount: UrlFeatureExtractor.Count, UsesEvidence: true), outDir);
 await File.WriteAllTextAsync(Path.Combine(outDir, "training-report.md"), report.ToString());
 
 Console.WriteLine();
@@ -177,7 +191,7 @@ internal sealed record ModelResult(string Name, ITransformer Model, BandPolicy P
     public Dictionary<string, double> Metrics { get; } = new();
 }
 
-internal sealed record TrainOptions(int Iterations, double TargetRecall, double TargetPrecision, string? OutDir, double DailyVolume, float MaxClear)
+internal sealed record TrainOptions(int Iterations, double TargetRecall, double TargetPrecision, string? OutDir, double DailyVolume, float MaxClear, float MinConfirm)
 {
     public static TrainOptions Parse(string[] args)
     {
@@ -189,6 +203,7 @@ internal sealed record TrainOptions(int Iterations, double TargetRecall, double 
             TargetPrecision: D("--target-precision", 0.995),
             OutDir: Get("--out"),
             DailyVolume: D("--daily-volume", 1_500_000),
-            MaxClear: (float)D("--max-clear", 0.5));
+            MaxClear: (float)D("--max-clear", 0.5),
+            MinConfirm: (float)D("--min-confirm", 0.9));
     }
 }

@@ -27,6 +27,7 @@ public class Worker(ILogger<Worker> logger, IServiceScopeFactory scopes, IConfig
     private ITransformer? _model;
     private ModelMetadata? _metadata;
     private DateTime _modelWrittenUtc;
+    private DateTime _rejectedWrittenUtc;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -57,8 +58,20 @@ public class Worker(ILogger<Worker> logger, IServiceScopeFactory scopes, IConfig
         }
         var written = File.GetLastWriteTimeUtc(Path.Combine(modelDir, ModelStore.MetadataFile));
         if (_metadata is not null && written == _modelWrittenUtc) return true;
+        if (written == _rejectedWrittenUtc) return false; // already reported this incompatible model
 
-        (_model, _metadata) = ModelStore.Load(_ml, modelDir);
+        var (model, metadata) = ModelStore.Load(_ml, modelDir);
+        if (metadata.FeatureCount != UrlFeatureExtractor.Count || !metadata.UsesEvidence)
+        {
+            logger.LogError(
+                "Model {Version} in {ModelDir} was trained with {ModelFeatures} URL features (evidence: {UsesEvidence}); this build extracts {Features} plus evidence. " +
+                "Pull the matching models/ folder or run PhishGuard.Training, then the worker picks it up automatically.",
+                metadata.Version, modelDir, metadata.FeatureCount, metadata.UsesEvidence, UrlFeatureExtractor.Count);
+            (_model, _metadata, _rejectedWrittenUtc) = (null, null, written);
+            return false;
+        }
+
+        (_model, _metadata) = (model, metadata);
         _modelWrittenUtc = written;
         logger.LogInformation("Loaded model {Version}: Clear < {Clear:F4}, Confirmed >= {Confirm:F4}",
             _metadata.Version, _metadata.Bands.ClearThreshold, _metadata.Bands.ConfirmThreshold);
@@ -81,11 +94,24 @@ public class Worker(ILogger<Worker> logger, IServiceScopeFactory scopes, IConfig
         while (!ct.IsCancellationRequested)
         {
             var batch = await db.Urls.AsNoTracking().Where(u => u.Id > lastId).OrderBy(u => u.Id).Take(batchSize)
-                .Select(u => new { u.Id, u.Url, u.Source }).ToListAsync(ct);
+                .Select(u => new { u.Id, u.Url, u.Source, u.RegisteredDomain, u.IngestedAtUtc }).ToListAsync(ct);
             if (batch.Count == 0) break;
 
+            // Short links are judged by their destination; every URL gets the evidence of its (effective) domain.
+            var expansions = await ExpansionsAsync(db, batch.Select(u => u.Url), ct);
+            var effective = batch.Select(u =>
+            {
+                var url = UrlModelInput.Effective(u.Url, expansions);
+                var domain = url == u.Url || !UrlParser.TryParse(url, out var p) ? u.RegisteredDomain : p.RegisteredDomain;
+                return (Url: url, Domain: domain);
+            }).ToArray();
+            var domains = effective.Select(e => e.Domain).Distinct().ToList();
+            var evidence = await db.DomainEvidence.AsNoTracking().Where(e => domains.Contains(e.RegisteredDomain))
+                .ToDictionaryAsync(e => e.RegisteredDomain, StringComparer.OrdinalIgnoreCase, ct);
+
             var inputs = new UrlModelInput[batch.Count];
-            Parallel.For(0, batch.Count, i => inputs[i] = UrlModelInput.Create(extractor, batch[i].Url));
+            Parallel.For(0, batch.Count, i => inputs[i] = UrlModelInput.Create(extractor, effective[i].Url, false,
+                evidence.GetValueOrDefault(effective[i].Domain), batch[i].IngestedAtUtc));
             var probabilities = _model!.Transform(_ml.Data.LoadFromEnumerable(inputs))
                 .GetColumn<float>(nameof(UrlPrediction.Probability)).ToArray();
 
@@ -123,6 +149,17 @@ public class Worker(ILogger<Worker> logger, IServiceScopeFactory scopes, IConfig
             campaigns, cases);
     }
 
+    /// <summary>Known destinations for any short links among <paramref name="urls"/> (simulated shortener expand API).</summary>
+    private static async Task<Dictionary<string, string>> ExpansionsAsync(PhishGuardDbContext db, IEnumerable<string> urls, CancellationToken ct)
+    {
+        var candidates = urls.Where(u => u.Length <= 400).Distinct().ToList();
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var chunk in candidates.Chunk(5_000))
+            foreach (var s in await db.ShortLinks.AsNoTracking().Where(s => chunk.Contains(s.ShortUrl)).ToListAsync(ct))
+                found[s.ShortUrl] = s.ExpandedUrl;
+        return found;
+    }
+
     private static async Task<(int Campaigns, int Cases)> BuildCampaignsAsync(
         PhishGuardDbContext db, BulkLoader loader, UrlFeatureExtractor extractor, string version, CancellationToken ct)
     {
@@ -132,10 +169,13 @@ public class Worker(ILogger<Worker> logger, IServiceScopeFactory scopes, IConfig
             .ToListAsync(ct);
         if (flagged.Count == 0) return (0, 0);
 
+        // Group by where a link really leads: 300 bit.ly codes pointing at one kit are one campaign.
+        var expansions = await ExpansionsAsync(db, flagged.Select(s => s.Url), ct);
         var groups = flagged.Select(s =>
             {
-                var (domain, pattern) = CampaignKey.Parts(s.Url);
-                var brandId = extractor.DetectBrand(s.Url);
+                var url = UrlModelInput.Effective(s.Url, expansions);
+                var (domain, pattern) = CampaignKey.Parts(url);
+                var brandId = extractor.DetectBrand(url);
                 return (s.Id, s.Band, s.Probability, domain, pattern, brandId,
                         Key: $"{version}|{CampaignKey.Build(s.Band.ToString(), domain, pattern, brandId)}");
             })
