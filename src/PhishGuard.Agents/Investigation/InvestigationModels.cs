@@ -3,9 +3,21 @@ using PhishGuard.Core.Urls;
 
 namespace PhishGuard.Agents.Investigation;
 
-/// <summary>Result of one automated step of the analysts' standard operating procedure.</summary>
+/// <summary>Result of one step of the analysts' standard operating procedure, automated or recorded by an analyst.</summary>
 /// <param name="Points">Contribution to the verdict: positive = more likely phishing, negative = more likely benign.</param>
-public sealed record StepFinding(int Step, string Name, FindingLevel Level, double Points, string Summary, IReadOnlyList<string> Details);
+/// <param name="RecordedBy">Analyst who assessed this step by hand; null for automated findings.</param>
+public sealed record StepFinding(int Step, string Name, FindingLevel Level, double Points, string Summary, IReadOnlyList<string> Details,
+    string? RecordedBy = null, DateTime? RecordedAtUtc = null)
+{
+    /// <summary>Verdict points for an analyst's assessment of a step.</summary>
+    public static double PointsFor(FindingLevel level) => level switch
+    {
+        FindingLevel.Malicious => 2.5,
+        FindingLevel.Suspicious => 1.0,
+        FindingLevel.Benign => -1.5,
+        _ => 0
+    };
+}
 
 /// <summary>Everything the steps may look at for one case. Built from SQL only — no step touches the live site.</summary>
 public sealed class InvestigationContext

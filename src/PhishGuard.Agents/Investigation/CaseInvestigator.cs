@@ -40,13 +40,16 @@ public sealed class CaseInvestigator(PhishGuardDbContext db, IEnumerable<IInvest
         if (context is null) return null;
 
         var started = DateTime.UtcNow;
+        // An analyst's own assessment of a step wins over the automated step (or the "not implemented" placeholder).
+        var byAnalyst = (await LatestFindingsAsync(db, caseId, ct)).Where(f => f.RecordedBy is not null).ToDictionary(f => f.Step);
         var findings = new List<StepFinding>();
         foreach (var (number, name) in EvidenceSteps)
         {
             var step = _steps.FirstOrDefault(s => s.Number == number);
-            findings.Add(step is null
-                ? new StepFinding(number, name, FindingLevel.Unknown, 0, "Not implemented yet", ["Add an IInvestigationStep with Number = " + number + "."])
-                : step.Run(context));
+            findings.Add(byAnalyst.TryGetValue(number, out var manual) ? manual
+                : step is null
+                    ? new StepFinding(number, name, FindingLevel.Unknown, 0, "Not implemented yet", ["Assess this step on the case page, or add an IInvestigationStep with Number = " + number + "."])
+                    : step.Run(context));
         }
 
         var (verdict, confidence, rationale) = DecideVerdict(context, findings);
@@ -116,10 +119,11 @@ public sealed class CaseInvestigator(PhishGuardDbContext db, IEnumerable<IInvest
 
         var reasons = findings.Where(f => f.Points != 0).OrderByDescending(f => Math.Abs(f.Points))
             .Select(f => $"step {f.Step} {f.Summary.ToLowerInvariant()} ({f.Points:+0.0;-0.0})").Take(3).ToList();
-        var implemented = findings.Count(f => f.Summary != "Not implemented yet");
+        var manual = findings.Count(f => f.RecordedBy is not null);
+        var automated = findings.Count(f => f.RecordedBy is null && f.Summary != "Not implemented yet");
         var rationale = $"Model score {c.ModelProbability:P0} ({c.ModelBand} band, {modelPoints:+0.0;-0.0} points)"
                         + (reasons.Count > 0 ? "; " + string.Join("; ", reasons) : "")
-                        + $". {implemented} of {EvidenceSteps.Length} evidence steps ran.";
+                        + $". Evidence steps: {manual} assessed by an analyst, {automated} automated, {EvidenceSteps.Length - manual - automated} not done.";
         return (verdict, confidence, rationale);
     }
 
@@ -220,6 +224,33 @@ public sealed class CaseInvestigator(PhishGuardDbContext db, IEnumerable<IInvest
         c.Case.Status = status;
         c.Case.UpdatedAtUtc = now;
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Saves an analyst's own assessment of one evidence step (1–5). It is kept in the case's audit trail (AgentRuns)
+    /// and used by every later investigation of the case. Does not change the case status by itself.
+    /// </summary>
+    public async Task<StepFinding?> RecordAssessmentAsync(long caseId, int step, FindingLevel level, string analyst, string? notes, CancellationToken ct = default)
+    {
+        var name = EvidenceSteps.FirstOrDefault(s => s.Number == step).Name;
+        if (name is null || !await db.Cases.AnyAsync(c => c.Id == caseId, ct)) return null;
+
+        var now = DateTime.UtcNow;
+        var details = (notes ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var finding = new StepFinding(step, name, level, StepFinding.PointsFor(level),
+            level == FindingLevel.Unknown ? "Analyst: not sure" : $"Analyst assessed as {level.ToString().ToLowerInvariant()}",
+            details, analyst, now);
+        db.AgentRuns.Add(new AgentRun
+        {
+            CaseId = caseId,
+            AgentName = $"Step{step}",
+            Input = $"analyst:{analyst}",
+            Output = JsonSerializer.Serialize(finding, Json),
+            StartedAtUtc = now,
+            CompletedAtUtc = now
+        });
+        await db.SaveChangesAsync(ct);
+        return finding;
     }
 
     /// <summary>hxxps://example[.]com — safe to paste into notices and chat.</summary>

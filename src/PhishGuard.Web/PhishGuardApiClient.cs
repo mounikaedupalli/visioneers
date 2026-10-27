@@ -24,6 +24,9 @@ public sealed class PhishGuardApiClient(HttpClient http)
     public async Task InvestigateAsync(long id, CancellationToken ct = default) =>
         (await http.PostAsync($"/api/cases/{id}/investigate", null, ct)).EnsureSuccessStatusCode();
 
+    public async Task AssessStepAsync(long id, int step, string level, string analyst, string? notes, CancellationToken ct = default) =>
+        (await http.PostAsJsonAsync($"/api/cases/{id}/steps/{step}", new { level, analyst, notes }, ct)).EnsureSuccessStatusCode();
+
     public async Task DecideAsync(long id, string decision, string analyst, string? notes, CancellationToken ct = default) =>
         (await http.PostAsJsonAsync($"/api/cases/{id}/decision", new { decision, analyst, notes }, ct)).EnsureSuccessStatusCode();
 

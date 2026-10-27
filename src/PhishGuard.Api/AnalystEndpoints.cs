@@ -11,6 +11,7 @@ public static class AnalystEndpoints
 {
     public record DecisionRequest(Verdict Decision, string Analyst, string? Notes);
     public record NoticeActionRequest(string Analyst);
+    public record StepAssessmentRequest(FindingLevel Level, string Analyst, string? Notes);
 
     public static RouteGroupBuilder MapAnalystEndpoints(this RouteGroupBuilder api)
     {
@@ -102,6 +103,14 @@ public static class AnalystEndpoints
 
         api.MapPost("/cases/{id:long}/investigate", async (CaseInvestigator investigator, long id, CancellationToken ct) =>
             await investigator.InvestigateAsync(id, ct) is { } r ? Results.Ok(r) : Results.NotFound());
+
+        // An analyst's own assessment of one evidence step (1–5): Benign / Suspicious / Malicious / Unknown ("not sure").
+        api.MapPost("/cases/{id:long}/steps/{step:int}", async (CaseInvestigator investigator, long id, int step, StepAssessmentRequest req, CancellationToken ct) =>
+        {
+            if (step is < 1 or > 5) return Results.BadRequest("Only steps 1–5 can be assessed; step 6 is the decision and step 7 follows from it.");
+            if (string.IsNullOrWhiteSpace(req.Analyst)) return Results.BadRequest("Analyst name is required.");
+            return await investigator.RecordAssessmentAsync(id, step, req.Level, req.Analyst, req.Notes, ct) is { } f ? Results.Ok(f) : Results.NotFound();
+        });
 
         api.MapPost("/cases/{id:long}/decision", async (PhishGuardDbContext db, CaseInvestigator investigator, long id, DecisionRequest req, CancellationToken ct) =>
         {
