@@ -16,6 +16,7 @@ public class PhishGuardDbContext(DbContextOptions<PhishGuardDbContext> options) 
     public DbSet<AnalystDecision> AnalystDecisions => Set<AnalystDecision>();
     public DbSet<EnforcementNotice> EnforcementNotices => Set<EnforcementNotice>();
     public DbSet<MonitorCheck> MonitorChecks => Set<MonitorCheck>();
+    public DbSet<Indicator> Indicators => Set<Indicator>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -55,6 +56,7 @@ public class PhishGuardDbContext(DbContextOptions<PhishGuardDbContext> options) 
             e.Property(x => x.CertIssuer).HasMaxLength(200);
             e.Property(x => x.PageTitle).HasMaxLength(500);
             e.Property(x => x.ScreenshotRef).HasMaxLength(500);
+            e.Property(x => x.SandboxPostTarget).HasMaxLength(500);
         });
 
         b.Entity<ShortLink>(e =>
@@ -106,6 +108,14 @@ public class PhishGuardDbContext(DbContextOptions<PhishGuardDbContext> options) 
             e.Property(x => x.Subject).HasMaxLength(300);
         });
         b.Entity<MonitorCheck>(e => e.ToTable("MonitorChecks"));
+        b.Entity<Indicator>(e =>
+        {
+            e.ToTable("Indicators");
+            e.Property(x => x.Value).HasMaxLength(800);
+            e.Property(x => x.Source).HasMaxLength(100);
+            e.HasIndex(x => new { x.Type, x.Value }).IsUnique();
+            e.HasIndex(x => x.CaseId);
+        });
 
         // Enums stored as strings: readable in SSMS and in agent tool output.
         foreach (var entity in b.Model.GetEntityTypes())

@@ -1,0 +1,102 @@
+@page "/"
+@inject PhishGuardApiClient Api
+
+<PageTitle>Dashboard · PhishGuard</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Dashboard</h1>
+        <div class="muted">From incoming URLs to takedowns. Model @(_d?.ModelVersion ?? "—")</div>
+    </div>
+    <a class="btn btn-primary" href="cases?status=AnalystReview">Open review queue (@Count(_d?.CasesByStatus, "AnalystReview"))</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="banner error">Could not load the dashboard: @_error</div>
+}
+else if (_d is null)
+{
+    <div class="empty">Loading…</div>
+}
+else
+{
+    <div class="grid grid-4">
+        <StatCard Label="URLs scored" Value="@_d.TotalScored.ToString("N0")" Hint="Tier 1 model, latest version" />
+        <StatCard Label="Flagged by the model" Value="@((Count(_d.Bands, "Gray") + Count(_d.Bands, "Confirmed")).ToString("N0"))"
+                  Hint="@($"{Count(_d.Bands, "Gray"):N0} uncertain · {Count(_d.Bands, "Confirmed"):N0} confirmed")" />
+        <StatCard Label="Cases needing an analyst" Value="@Count(_d.CasesByStatus, "AnalystReview").ToString("N0")" Accent="true"
+                  Hint="@($"of {TotalCases:N0} cases; {_d.Investigated:N0} auto-investigated")" />
+        <StatCard Label="Takedown notices to approve" Value="@Count(_d.NoticesByStatus, "Draft").ToString("N0")"
+                  Hint="@($"{Count(_d.NoticesByStatus, "Filed"):N0} filed · {_d.Indicators:N0} indicators blocked")" />
+    </div>
+
+    <div class="split" style="margin-top:16px">
+        <div class="card">
+            <h2>Funnel</h2>
+            @Row("URLs scored", _d.TotalScored, "")
+            @Row("Cleared by model", Count(_d.Bands, "Clear"), "clear")
+            @Row("Uncertain (Gray)", Count(_d.Bands, "Gray"), "gray")
+            @Row("Confirmed by model", Count(_d.Bands, "Confirmed"), "confirmed")
+            @Row("Cases (campaigns)", TotalCases, "")
+            @Row("Needs an analyst", Count(_d.CasesByStatus, "AnalystReview"), "review")
+            @Row("Takedown filed", Count(_d.CasesByStatus, "TakedownFiled"), "")
+            <p class="muted small" style="margin:10px 0 0">Bars use a log scale so small stages stay visible.</p>
+        </div>
+
+        <div class="stack">
+            <div class="card">
+                <h2>Cases by status</h2>
+                <table class="data">
+                    @foreach (var (status, n) in _d.CasesByStatus.Where(s => s.Value > 0).OrderByDescending(s => s.Value))
+                    {
+                        <tr class="clickable" @onclick="@(() => Nav.NavigateTo($"cases?status={status}"))">
+                            <td><Badge Text="@Display.StatusLabel(status)" Css="@Display.StatusClass(status)" /></td>
+                            <td class="num">@n.ToString("N0")</td>
+                        </tr>
+                    }
+                </table>
+            </div>
+            <div class="card">
+                <h2>Most targeted brands (open cases)</h2>
+                @if (_d.TopBrands.Count == 0)
+                {
+                    <div class="muted">No open cases.</div>
+                }
+                <table class="data">
+                    @foreach (var b in _d.TopBrands)
+                    {
+                        <tr><td>@b.Brand</td><td class="num">@b.Cases.ToString("N0")</td></tr>
+                    }
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+    private DashboardDto? _d;
+    private string? _error;
+
+    private int TotalCases => _d?.CasesByStatus.Values.Sum() ?? 0;
+
+    private static int Count(Dictionary<string, int>? d, string key) => d?.GetValueOrDefault(key) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _d = await Api.GetDashboardAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private RenderFragment Row(string label, int value, string css) => __builder =>
+    {
+        var max = Math.Max(1, _d?.TotalScored ?? 1);
+        var width = value <= 0 ? 0 : Math.Max(1.5, 100 * Math.Log10(value + 1) / Math.Log10(max + 1));
+        <div class="funnel-row">
+            <span>@label</span>
+            <div><div class="funnel-bar @css" style="width:@(width.ToString("F1", System.Globalization.CultureInfo.InvariantCulture))%"></div></div>
+            <span class="funnel-num">@value.ToString("N0")</span>
+        </div>
+    };
+}

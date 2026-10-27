@@ -1,0 +1,6 @@
+<span class="badge @Css">@Text</span>
+
+@code {
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+    [Parameter] public string Css { get; set; } = "b-neutral";
+}

@@ -1,0 +1,236 @@
+@page "/cases/{Id:long}"
+@inject PhishGuardApiClient Api
+@inject AnalystIdentity Analyst
+
+<PageTitle>PG-@Id · PhishGuard</PageTitle>
+
+<p style="margin:0 0 10px"><a href="cases?status=AnalystReview">← Review queue</a></p>
+
+@if (_error is not null)
+{
+    <div class="banner error">@_error</div>
+}
+@if (_message is not null)
+{
+    <div class="banner ok">@_message</div>
+}
+
+@if (_c is null && _error is null)
+{
+    <div class="empty">Loading…</div>
+}
+else if (_c is not null)
+{
+    <div class="card">
+        <div class="case-head">
+            <div>
+                <div class="muted small mono">PG-@_c.Id · campaign @_c.Campaign.Id</div>
+                <div class="case-title">@Display.Defang(_c.Campaign.RegisteredDomain)<span class="muted">@_c.Campaign.PathPattern</span></div>
+                <div class="meta">
+                    <Badge Text="@Display.StatusLabel(_c.Status)" Css="@Display.StatusClass(_c.Status)" />
+                    <Badge Text="@Display.VerdictLabel(_c.Verdict)" Css="@Display.VerdictClass(_c.Verdict)" />
+                    <span>Brand: <strong>@(_c.Campaign.Brand ?? "unknown")</strong></span>
+                    <span>@_c.Campaign.UrlCount.ToString("N0") URL(s)</span>
+                    <span>Model score @Display.Pct(_c.Campaign.MaxProbability)</span>
+                    <span>Confidence <span class="meter"><span style="width:@(((_c.Confidence ?? 0) * 100).ToString("F0"))%"></span></span> @Display.Pct(_c.Confidence)</span>
+                </div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-danger" disabled="@_busy" @onclick="@(() => DecideAsync("Phishing"))">Confirm phishing</button>
+                <button class="btn btn-ok" disabled="@_busy" @onclick="@(() => DecideAsync("Benign"))">Mark benign</button>
+                <button class="btn" disabled="@_busy" @onclick="RerunAsync">Re-run investigation</button>
+            </div>
+        </div>
+        @if (!string.IsNullOrEmpty(_c.Rationale))
+        {
+            <p class="muted" style="margin:12px 0 0">@_c.Rationale</p>
+        }
+        <div style="margin-top:12px">
+            <textarea class="text" placeholder="Analyst notes (saved with your decision)" @bind="_notes"></textarea>
+        </div>
+    </div>
+
+    <div class="split" style="margin-top:16px">
+        <div class="stack">
+            <div class="card">
+                <h2>Investigation checklist</h2>
+                <div class="steps">
+                    @foreach (var s in _c.Steps)
+                    {
+                        <div class="step lvl-@s.Level">
+                            <div class="step-num">@s.Step</div>
+                            <div>
+                                <h3>@s.Name</h3>
+                                <div>@s.Summary</div>
+                                @if (s.Details.Count > 0)
+                                {
+                                    <ul>@foreach (var d in s.Details) { <li>@d</li> }</ul>
+                                }
+                            </div>
+                            <div style="text-align:right">
+                                <Badge Text="@s.Level" Css="@Display.LevelClass(s.Level)" />
+                                @if (s.Points != 0)
+                                {
+                                    <div class="points" style="margin-top:6px">@s.Points.ToString("+0.0;-0.0") pts</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>URLs in this campaign (top @_c.Urls.Count)</h2>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>URL (defanged)</th><th class="num">Score</th><th>Band</th><th>Seen</th></tr></thead>
+                        <tbody>
+                            @foreach (var u in _c.Urls)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="mono">@Display.Defang(u.Url)</div>
+                                        @if (u.ExpandedUrl is not null)
+                                        {
+                                            <div class="muted small mono">→ @Display.Defang(u.ExpandedUrl)</div>
+                                        }
+                                    </td>
+                                    <td class="num">@Display.Pct(u.Probability)</td>
+                                    <td>@u.Band</td>
+                                    <td class="small muted">@u.IngestedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="stack">
+            <div class="card">
+                <h2>Domain evidence</h2>
+                @if (_c.Evidence is not { } e)
+                {
+                    <div class="muted">No WHOIS, certificate or snapshot record for this domain.</div>
+                }
+                else
+                {
+                    <dl class="kv">
+                        <dt>Registered</dt><dd>@(e.CreatedOnUtc?.ToString("yyyy-MM-dd") ?? "—") @(Age(e.CreatedOnUtc))</dd>
+                        <dt>Registrar</dt><dd>@e.Registrar</dd>
+                        <dt>Privacy protected</dt><dd>@(e.PrivacyProtected ? "Yes" : "No")</dd>
+                        <dt>Hosting</dt><dd>@e.HostingProvider (@e.RegistrantCountry)</dd>
+                        <dt>Certificate</dt><dd>@e.CertIssuer, issued @(e.CertIssuedOnUtc?.ToString("yyyy-MM-dd") ?? "—")</dd>
+                        <dt>Page title</dt><dd>@e.PageTitle</dd>
+                        <dt>Login form</dt><dd>@(e.HasLoginForm ? "Yes" : "No")</dd>
+                        <dt>Brand logo</dt><dd>@(e.BrandLogoDetected ? "Detected" : "Not detected")</dd>
+                        <dt>Similarity to brand page</dt><dd>@Display.Pct(e.BrandPageSimilarity)</dd>
+                    </dl>
+                    <h2 style="margin-top:16px">Sandbox test (dummy credentials)</h2>
+                    <dl class="kv">
+                        <dt>Run</dt><dd>@(e.SandboxRunAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "Not run")</dd>
+                        <dt>Accepted fake login</dt><dd>@Display.YesNo(e.SandboxAcceptsAnyCredentials)</dd>
+                        <dt>Posted data elsewhere</dt><dd>@Display.YesNo(e.SandboxPostsToExternalHost) <span class="mono small">@e.SandboxPostTarget</span></dd>
+                        <dt>Forwarded to real site</dt><dd>@Display.YesNo(e.SandboxRedirectsToBrand)</dd>
+                    </dl>
+                    <p class="muted small" style="margin:10px 0 0">Simulated: a real sandbox runs in an isolated browser, never on an analyst's machine.</p>
+                }
+            </div>
+
+            <div class="card">
+                <h2>Takedown notices</h2>
+                @if (_c.Notices.Count == 0)
+                {
+                    <div class="muted">None yet. Notices are drafted when the case is confirmed as phishing.</div>
+                }
+                <div class="stack">
+                    @foreach (var n in _c.Notices)
+                    {
+                        <div class="notice">
+                            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+                                <div><strong>@n.Route</strong> <span class="muted">→ @n.Recipient</span></div>
+                                <Badge Text="@n.Status" Css="@Display.NoticeClass(n.Status)" />
+                            </div>
+                            <div class="small" style="margin-top:4px">@n.Subject</div>
+                            @if (_open.Contains(n.Id))
+                            {
+                                <pre>@n.Body</pre>
+                            }
+                            <div class="actions" style="margin-top:10px">
+                                <button class="btn btn-sm" @onclick="@(() => Toggle(n.Id))">@(_open.Contains(n.Id) ? "Hide" : "Preview")</button>
+                                @if (n.Status == "Draft")
+                                {
+                                    <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="@(() => NoticeAsync(n.Id, true))">Approve &amp; file</button>
+                                    <button class="btn btn-sm" disabled="@_busy" @onclick="@(() => NoticeAsync(n.Id, false))">Reject</button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+                @if (_c.Indicators > 0)
+                {
+                    <p class="muted small" style="margin:12px 0 0">@_c.Indicators indicator(s) from this case are on the <a href="indicators">block-list</a>.</p>
+                }
+            </div>
+
+            <div class="card">
+                <h2>Decision history</h2>
+                @if (_c.Decisions.Count == 0)
+                {
+                    <div class="muted">No analyst decision yet.</div>
+                }
+                <table class="data">
+                    @foreach (var d in _c.Decisions)
+                    {
+                        <tr>
+                            <td><Badge Text="@d.Decision" Css="@Display.VerdictClass(d.Decision)" /></td>
+                            <td>@d.Analyst<div class="muted small">@d.Notes</div></td>
+                            <td class="small muted">@d.DecidedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                        </tr>
+                    }
+                </table>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+
+    private CaseDetailDto? _c;
+    private string? _error, _message, _notes;
+    private bool _busy;
+    private readonly HashSet<long> _open = [];
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try { _c = await Api.GetCaseAsync(Id); _error = null; }
+        catch (Exception ex) { _error = $"Could not load case PG-{Id}: {ex.Message}"; }
+    }
+
+    private async Task RunAsync(Func<Task> action, string done)
+    {
+        _busy = true; _message = null; _error = null;
+        try { await action(); _message = done; await LoadAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task DecideAsync(string decision) => RunAsync(async () =>
+    {
+        await Api.DecideAsync(Id, decision, Analyst.Name, _notes);
+        _notes = null;
+    }, decision == "Phishing" ? "Confirmed as phishing. Takedown notices were drafted for approval." : "Marked benign. The case is dismissed and its indicators were removed.");
+
+    private Task RerunAsync() => RunAsync(() => Api.InvestigateAsync(Id), "Investigation re-run.");
+
+    private Task NoticeAsync(long id, bool approve) => RunAsync(
+        () => approve ? Api.ApproveNoticeAsync(id, Analyst.Name) : Api.RejectNoticeAsync(id, Analyst.Name),
+        approve ? "Notice marked as filed (simulated; nothing was sent)." : "Notice rejected.");
+
+    private void Toggle(long id) { if (!_open.Remove(id)) _open.Add(id); }
+
+    private static string Age(DateTime? created) => created is { } c ? $"({(DateTime.UtcNow - c).TotalDays:N0} days ago)" : "";
+}

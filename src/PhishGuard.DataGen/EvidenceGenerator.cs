@@ -81,7 +81,7 @@ public sealed class EvidenceGenerator(int seed, IReadOnlyList<ProtectedBrand> br
         var certAge = malicious ? _rng.Next(0, 30) : _rng.Next(1, 365);
         var shownBrand = brand ?? ownerBrand;
 
-        return new DomainEvidence
+        var evidence = new DomainEvidence
         {
             RegisteredDomain = domain,
             CreatedOnUtc = asOfUtc.AddDays(-ageDays).Date,
@@ -100,12 +100,48 @@ public sealed class EvidenceGenerator(int seed, IReadOnlyList<ProtectedBrand> br
             BrandLogoDetected = pagePhishy ? Chance(Hard ? 0.7 : 0.85) : brandOwned || (Hard && Chance(0.05)),
             ScreenshotRef = $"synthetic://screenshots/{domain}.png"
         };
+        ApplySandbox(evidence, pagePhishy, brandOwned, shownBrand);
+        return evidence;
     }
 
     private (string, string) PlatformRegistrar(string domain) =>
         domain.Contains("web.app") || domain.Contains("firebaseapp") || domain.Contains("appspot") ? ("Google LLC", "google.com")
         : domain.Contains("windows.net") || domain.Contains("azurewebsites") ? ("Microsoft Corporation", "microsoft.com")
         : ("Platform-managed subdomain", "platform.invalid");
+
+    /// <summary>
+    /// Simulated sandbox detonation (analyst step 4): an isolated browser submits dummy credentials and records what
+    /// the page did. Uses its own random stream so the rest of the evidence is unchanged.
+    /// </summary>
+    private void ApplySandbox(DomainEvidence e, bool pagePhishy, bool brandOwned, ProtectedBrand? brand)
+    {
+        e.SandboxRunAtUtc = asOfUtc;
+        e.BrandPageSimilarity = (float)(brandOwned ? 1.0
+            : pagePhishy && brand is not null ? (Hard ? 0.45 : 0.6) + _sandbox.NextDouble() * (Hard ? 0.5 : 0.38)
+            : _sandbox.NextDouble() * (Hard ? 0.45 : 0.3));
+        if (!e.HasLoginForm) return; // nothing to submit: the credential checks stay null ("not applicable")
+
+        bool S(double p) => _sandbox.NextDouble() < p;
+        if (pagePhishy)
+        {
+            e.SandboxAcceptsAnyCredentials = S(Hard ? 0.75 : 0.85);
+            e.SandboxPostsToExternalHost = S(0.6);
+            e.SandboxRedirectsToBrand = S(0.45);   // "smart" kits forward the victim to the real site afterwards
+        }
+        else
+        {
+            e.SandboxAcceptsAnyCredentials = S(0.02);  // demo / test login pages
+            e.SandboxPostsToExternalHost = S(brandOwned ? 0.1 : 0.15); // legitimate SSO / identity providers
+            e.SandboxRedirectsToBrand = S(0.01);
+        }
+        if (e.SandboxPostsToExternalHost == true)
+            e.SandboxPostTarget = pagePhishy
+                ? SandboxPick(["https://api.telegram.org/bot{token}/sendMessage", "https://{random}.top/gate.php", "https://formsubmit.co/{email}", "https://{random}.workers.dev/collect"])
+                : SandboxPick(["https://login.microsoftonline.com/common/oauth2", "https://accounts.google.com/o/oauth2", "https://{tenant}.okta.com/login", "https://auth0.com/u/login"]);
+    }
+
+    private readonly Random _sandbox = new(seed + 101);
+    private string SandboxPick(string[] items) => items[_sandbox.Next(items.Length)];
 
     private bool Chance(double p) => _rng.NextDouble() < p;
     private T Pick<T>(IReadOnlyList<T> items) => items[_rng.Next(items.Count)];

@@ -1,23 +1,20 @@
+using Microsoft.Extensions.DependencyInjection;
+using PhishGuard.Agents.Investigation;
+
 namespace PhishGuard.Agents;
 
 /// <summary>
-/// Phase 4 — the Tier-3 agents (Microsoft Agent Framework on Azure OpenAI). They only ever see Gray-band
-/// campaigns, and their tools read SQL Server (DomainEvidence, Brands, Urls) — never the live site.
+/// Registers the investigation pipeline. Evidence steps (1–5 of the analysts' procedure) are pluggable:
+/// add a class implementing <see cref="IInvestigationStep"/> and register it here, e.g.
+/// <c>services.AddScoped&lt;IInvestigationStep, MyInfrastructureStep&gt;();</c>.
+/// Steps read SQL Server only (DomainEvidence, ShortLinks, Urls) — never the live site.
 /// </summary>
 public static class AgentCatalog
 {
-    public const string Evidence = "EvidenceAgent";       // tools: GetDomainEvidence, GetCampaignUrls
-    public const string Brand = "BrandAgent";             // tools: GetProtectedBrands, CompareToBrand
-    public const string Verdict = "VerdictAgent";         // returns Verdict + confidence + rationale
-    public const string Enforcement = "EnforcementAgent"; // picks EnforcementRoute, drafts EnforcementNotice (never sent)
-    public const string Monitor = "MonitorAgent";         // schedules MonitorChecks for reactivation
-
-    public static readonly IReadOnlyDictionary<string, string> Instructions = new Dictionary<string, string>
+    public static IServiceCollection AddInvestigation(this IServiceCollection services, InvestigationOptions? options = null)
     {
-        [Evidence] = "Collect WHOIS/RDAP, certificate and page-snapshot evidence for the campaign's domain from the provided tools. Report facts only.",
-        [Brand] = "Decide whether the URLs impersonate a protected brand. Consider typosquats, homoglyphs, brand tokens outside the registered domain, and embedded redirect targets.",
-        [Verdict] = "Given the evidence and brand analysis, classify the campaign as Phishing, Benign or NeedsHuman. Give a confidence from 0 to 1 and a short rationale an analyst can verify.",
-        [Enforcement] = "For a confirmed phishing campaign choose the best route (Registrar, HostingProvider, Udrp, PlatformAbuse) and draft a concise takedown notice citing the evidence.",
-        [Monitor] = "Propose a re-check schedule for a taken-down domain to detect reactivation."
-    };
+        services.AddSingleton(options ?? new InvestigationOptions());
+        services.AddScoped<CaseInvestigator>();
+        return services;
+    }
 }

@@ -1,0 +1,54 @@
+@page "/dataset"
+@inject PhishGuardApiClient Api
+
+<PageTitle>Dataset · PhishGuard</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Dataset</h1>
+        <div class="muted">The labelled synthetic dataset the model is trained and evaluated on.</div>
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <div class="banner error">Could not reach the API: @_error. Is the dataset loaded (run PhishGuard.DataGen)?</div>
+}
+else if (_stats is null)
+{
+    <div class="empty">Loading…</div>
+}
+else
+{
+    <div class="grid grid-3">
+        <StatCard Label="URLs" Value="@_stats.TotalUrls.ToString("N0")" />
+        <StatCard Label="Phishing" Value="@_stats.PhishingUrls.ToString("N0")" Hint="@($"{100.0 * _stats.PhishingUrls / Math.Max(1, _stats.TotalUrls):F2}% of all URLs")" />
+        <StatCard Label="Domains with evidence" Value="@_stats.DomainsWithEvidence.ToString("N0")" />
+    </div>
+    <div class="card table-wrap" style="margin-top:16px;padding:4px 6px">
+        <table class="data">
+            <thead><tr><th>Category</th><th>Label</th><th class="num">Count</th></tr></thead>
+            <tbody>
+                @foreach (var c in _stats.ByCategory)
+                {
+                    <tr>
+                        <td>@c.Category</td>
+                        <td><Badge Text="@(c.IsPhishing ? "phishing" : "benign")" Css="@(c.IsPhishing ? "b-bad" : "b-ok")" /></td>
+                        <td class="num">@c.Count.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private DatasetStats? _stats;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _stats = await Api.GetStatsAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

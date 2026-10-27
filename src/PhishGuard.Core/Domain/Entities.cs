@@ -49,6 +49,31 @@ public class DomainEvidence
     public bool HasLoginForm { get; set; }
     public bool BrandLogoDetected { get; set; }
     public string? ScreenshotRef { get; set; }
+
+    // ---- Sandbox detonation (analyst step 4: dummy credentials), simulated ----
+    // A real deployment runs this in an isolated browser sandbox, never on an analyst's machine.
+    // Null = the sandbox has not run for this domain.
+    public DateTime? SandboxRunAtUtc { get; set; }
+    /// <summary>The login form accepted made-up credentials (a real login would reject them).</summary>
+    public bool? SandboxAcceptsAnyCredentials { get; set; }
+    /// <summary>The form posted the dummy data to a different host than the page's own.</summary>
+    public bool? SandboxPostsToExternalHost { get; set; }
+    public string? SandboxPostTarget { get; set; }
+    /// <summary>After submitting, the victim was silently forwarded to the genuine brand site (hides the theft).</summary>
+    public bool? SandboxRedirectsToBrand { get; set; }
+    /// <summary>Visual similarity (0–1) of the page to the impersonated brand's real login page.</summary>
+    public float? BrandPageSimilarity { get; set; }
+}
+
+/// <summary>A blocked indicator (domain, URL or IP) added when a case is confirmed. Exported for block-lists.</summary>
+public class Indicator
+{
+    public long Id { get; set; }
+    public IndicatorType Type { get; set; }
+    public required string Value { get; set; }
+    public long CaseId { get; set; }
+    public required string Source { get; set; }
+    public DateTime AddedAtUtc { get; set; }
 }
 
 /// <summary>

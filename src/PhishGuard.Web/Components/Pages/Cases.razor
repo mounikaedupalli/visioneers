@@ -1,0 +1,110 @@
+@page "/cases"
+@inject PhishGuardApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>@Title · PhishGuard</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>@Title</h1>
+        <div class="muted">One case per campaign: URLs with the same domain, kit path and brand. Biggest campaigns first.</div>
+    </div>
+</div>
+
+<div class="tabs">
+    @foreach (var (value, label) in Tabs)
+    {
+        <button class="tab @(Active == value ? "active" : "")" @onclick="@(() => Nav.NavigateTo($"cases?status={value}"))">@label</button>
+    }
+</div>
+
+<div class="toolbar">
+    <input class="text" placeholder="Search domain…" @bind="_search" @bind:event="oninput" @onkeyup="OnSearchKey" />
+    <button class="btn" @onclick="() => LoadAsync(1)">Search</button>
+    @if (_page is not null)
+    {
+        <span class="muted">@_page.Total.ToString("N0") case(s)</span>
+    }
+</div>
+
+@if (_error is not null)
+{
+    <div class="banner error">Could not load cases: @_error</div>
+}
+else if (_page is null)
+{
+    <div class="empty">Loading…</div>
+}
+else if (_page.Items.Count == 0)
+{
+    <div class="card empty">Nothing here. @(Active == "AnalystReview" ? "The queue is clear." : "")</div>
+}
+else
+{
+    <div class="card table-wrap" style="padding:4px 6px">
+        <table class="data">
+            <thead>
+                <tr>
+                    <th>Case</th><th>Domain / kit path</th><th>Brand</th><th class="num">URLs</th>
+                    <th class="num">Model</th><th>Investigation</th><th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _page.Items)
+                {
+                    <tr class="clickable" @onclick="@(() => Nav.NavigateTo($"cases/{c.Id}"))">
+                        <td class="mono">PG-@c.Id</td>
+                        <td><div class="mono">@Display.Defang(c.RegisteredDomain)</div><div class="muted small mono">@c.PathPattern</div></td>
+                        <td>@(c.Brand ?? "—")</td>
+                        <td class="num">@c.UrlCount.ToString("N0")</td>
+                        <td class="num">@Display.Pct(c.ModelProbability)</td>
+                        <td>
+                            @if (c.Investigated)
+                            {
+                                <Badge Text="@($"{Display.VerdictLabel(c.Verdict)} · {Display.Pct(c.Confidence)}")" Css="@Display.VerdictClass(c.Verdict)" />
+                            }
+                            else
+                            {
+                                <Badge Text="Pending" Css="b-neutral" />
+                            }
+                        </td>
+                        <td><Badge Text="@Display.StatusLabel(c.Status)" Css="@Display.StatusClass(c.Status)" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="pager">
+        <button class="btn btn-sm" disabled="@(_page.Page <= 1)" @onclick="() => LoadAsync(_page.Page - 1)">Previous</button>
+        <span class="muted small">Page @_page.Page of @Math.Max(1, (int)Math.Ceiling(_page.Total / (double)_page.PageSize))</span>
+        <button class="btn btn-sm" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="() => LoadAsync(_page.Page + 1)">Next</button>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "status")] public string? Status { get; set; }
+
+    private static readonly (string Value, string Label)[] Tabs =
+    [
+        ("AnalystReview", "Needs analyst"), ("AgentReview", "Investigating"), ("Confirmed", "Confirmed"),
+        ("TakedownFiled", "Takedown filed"), ("Dismissed", "Dismissed"), ("all", "All")
+    ];
+
+    private PagedResult<CaseRow>? _page;
+    private string? _error;
+    private string? _search;
+
+    private string Active => string.IsNullOrEmpty(Status) ? "AnalystReview" : Status;
+    private string Title => Active == "AnalystReview" ? "Review queue" : Tabs.FirstOrDefault(t => t.Value == Active).Label ?? "Cases";
+
+    protected override Task OnParametersSetAsync() => LoadAsync(1);
+
+    private async Task LoadAsync(int page)
+    {
+        _error = null;
+        try { _page = await Api.GetCasesAsync(Active == "all" ? null : Active, _search, page); }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private Task OnSearchKey(KeyboardEventArgs e) => e.Key == "Enter" ? LoadAsync(1) : Task.CompletedTask;
+}

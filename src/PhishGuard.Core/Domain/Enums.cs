@@ -43,7 +43,12 @@ public enum CaseStatus { Open = 0, AgentReview = 1, AnalystReview = 2, Confirmed
 
 public enum Verdict { Unknown = 0, Phishing = 1, Benign = 2, NeedsHuman = 3 }
 
-public enum EnforcementRoute { Registrar = 0, HostingProvider = 1, Udrp = 2, PlatformAbuse = 3 }
+public enum EnforcementRoute { Registrar = 0, HostingProvider = 1, Udrp = 2, PlatformAbuse = 3, CertificateAuthority = 4 }
+
+public enum IndicatorType { Domain = 0, Url = 1, Ip = 2 }
+
+/// <summary>Outcome of one automated investigation step.</summary>
+public enum FindingLevel { Unknown = 0, Benign = 1, Suspicious = 2, Malicious = 3 }
 
 public enum NoticeStatus { Draft = 0, Filed = 1, Acknowledged = 2, Resolved = 3, Rejected = 4 }
 

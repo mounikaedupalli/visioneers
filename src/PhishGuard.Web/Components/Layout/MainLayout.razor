@@ -1,6 +1,33 @@
 ﻿@inherits LayoutComponentBase
+@inject AnalystIdentity Analyst
 
-@Body
+<div class="shell">
+    <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">🛡</span> PhishGuard</div>
+
+        <div class="nav-section">Triage</div>
+        <NavLink class="nav-link" href="" Match="NavLinkMatch.All">Dashboard</NavLink>
+        <NavLink class="nav-link" href="cases?status=AnalystReview">Review queue</NavLink>
+        <NavLink class="nav-link" href="cases?status=all">All cases</NavLink>
+
+        <div class="nav-section">Enforcement</div>
+        <NavLink class="nav-link" href="enforcement">Takedown notices</NavLink>
+        <NavLink class="nav-link" href="indicators">Block-list</NavLink>
+
+        <div class="nav-section">Data</div>
+        <NavLink class="nav-link" href="dataset">Dataset</NavLink>
+    </aside>
+
+    <div class="main">
+        <header class="topbar">
+            <span class="muted small">Links are shown defanged and are never clickable.</span>
+            <span class="who">Signed in as <strong>@Analyst.Name</strong></span>
+        </header>
+        <main class="content">
+            @Body
+        </main>
+    </div>
+</div>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.

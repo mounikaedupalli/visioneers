@@ -17,5 +17,6 @@
     <ProjectReference Include="..\PhishGuard.Data\PhishGuard.Data.csproj" />
     <ProjectReference Include="..\PhishGuard.ServiceDefaults\PhishGuard.ServiceDefaults.csproj" />
     <ProjectReference Include="..\PhishGuard.Ml\PhishGuard.Ml.csproj" />
+    <ProjectReference Include="..\PhishGuard.Agents\PhishGuard.Agents.csproj" />
   </ItemGroup>
 </Project>
