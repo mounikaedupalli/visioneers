@@ -7,7 +7,7 @@ namespace PhishGuard.Data;
 public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<PhishGuardDbContext>
 {
     public const string DefaultConnection =
-        @"Server=(localdb)\MSSQLLocalDB;Database=PhishGuard;Trusted_Connection=True;TrustServerCertificate=True";
+        "Server=tcp:phishguard-sql-visioneers.database.windows.net,1433;Database=PhishGuard;Authentication=Active Directory Default;Encrypt=True;TrustServerCertificate=False;Connect Timeout=60";
 
     public PhishGuardDbContext CreateDbContext(string[] args)
     {

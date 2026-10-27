@@ -22,10 +22,32 @@ high volume of incoming URLs while cutting the false positives analysts review b
 ## Prerequisites
 
 - .NET 9 SDK (moving to .NET 10 + Aspire 13 later just means bumping the versions)
-- SQL Server LocalDB (comes with Visual Studio / SQL Server Express), or any SQL Server; edit `ConnectionStrings:phishguard`
+- Access to the shared **Azure SQL** database (see below), or SQL Server LocalDB for a private copy
 - VS Code + C# Dev Kit
 - **Keep the repo at a short path** such as `C:\PhishGuard`. Windows has a 260-character path limit
   unless long paths are enabled; deep folders break the build with "file not found" copy errors.
+
+## Database
+
+All projects use the `phishguard` connection string, which points at the team's shared **Azure SQL** database
+`PhishGuard` on `phishguard-sql-visioneers.database.windows.net`. Sign-in is Microsoft Entra only
+(`Authentication=Active Directory Default`): it uses the account you are signed in with in Visual Studio or `az login`.
+No passwords are stored in the repo.
+
+To connect you need:
+1. A database user: the server's Entra admin runs `CREATE USER [you@evoketechnologies.com] FROM EXTERNAL PROVIDER;`
+   plus `db_datareader` / `db_datawriter` role membership (and `db_ddladmin` to run migrations).
+2. A firewall rule for your public IP (Portal → SQL servers → phishguard-sql-visioneers → Networking).
+
+Tables were created from `db/schema-azure-portal.sql`. Shared-database rules:
+- **Never run DataGen with `--reset` against Azure**: it drops the database, and EF could recreate it on a paid tier.
+- **Run only one Scoring worker** for the team; others should stop the `scoring` resource in the Aspire dashboard.
+
+To use a private LocalDB copy instead, override the connection string for your user account:
+
+```bash
+setx ConnectionStrings__phishguard "Server=(localdb)\MSSQLLocalDB;Database=PhishGuard;Trusted_Connection=True;TrustServerCertificate=True"
+```
 
 ## Run
 
