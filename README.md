@@ -14,8 +14,8 @@ high volume of incoming URLs while cutting the false positives analysts review b
 | `PhishGuard.Training` | ✅ | Trains baseline vs PhishGuard LightGBM models, writes `models/model.zip`, `model.json`, `training-report.md` |
 | `PhishGuard.Scoring` | ✅ | Worker: Tier 0 rules + model → Clear / Gray / Confirmed → campaigns → cases (about 40 s for 500K) |
 | `PhishGuard.Api` | ✅ | Minimal API: dataset (`/api/stats`, `/api/urls`, `/api/brands`, `/api/evidence/{domain}`) and results (see below) |
-| `PhishGuard.Web` | 🟡 | Blazor Server console (dataset overview page) |
-| `PhishGuard.Agents` | ⬜ stub | Agent Framework agents (Evidence, Brand, Verdict, Enforcement, Monitor) on Azure OpenAI |
+| `PhishGuard.Web` | ✅ | Blazor analyst console: dashboard, review queue, case investigation, takedown notices, block-list |
+| `PhishGuard.Agents` | 🟡 | Investigation pipeline (analysts' 7 steps): verdict + enforcement drafting done, evidence steps 1–5 pluggable |
 | `PhishGuard.AppHost` | ✅ | Aspire: runs Api + Scoring + Web against the `phishguard` connection string |
 | `PhishGuard.Tests` | ✅ | xUnit tests for the parser and feature extractor |
 
@@ -154,6 +154,53 @@ New migration: `dotnet ef migrations add <Name> --project src/PhishGuard.Data --
 
 Or query SQL directly: `UrlScores` (one row per URL per model version), `Campaigns`, `Cases`.
 
+## Analyst automation (after the model flags a URL)
+
+Every case the Scoring worker creates (Gray → `AgentReview`, or auto-`Confirmed`) is picked up by the
+**InvestigationWorker** in the Scoring host, which runs the analysts' procedure as a pipeline
+(`PhishGuard.Agents/Investigation/CaseInvestigator.cs`). Cleared URLs never reach it.
+
+| Analyst step | Automated by | Status |
+|---|---|---|
+| 1. Syntax & domain inspection | `IInvestigationStep` #1 | Slot ready, implementation to add |
+| 2. Infrastructure & hosting (WHOIS age) | `IInvestigationStep` #2 | Slot ready, implementation to add |
+| 3. Content & layout evaluation | `IInvestigationStep` #3 | Slot ready, implementation to add |
+| 4. Behavioral test (dummy input) | `IInvestigationStep` #4, reading simulated sandbox results | Slot ready; data simulated by DataGen |
+| 5. SSL/TLS certificate audit | `IInvestigationStep` #5 | Slot ready, implementation to add |
+| 6. Confirmation & triage verdict | `CaseInvestigator` (model score + step points → confidence) | ✅ |
+| 7. Mitigation & enforcement | `CaseInvestigator` drafts notices (registrar, host, CA) and block-list indicators | ✅ drafts only |
+
+- **Steps 1–5 are pluggable:** implement `IInvestigationStep` (return a `StepFinding` with a level, points and
+  plain-English details) and register it in `AgentCatalog.AddInvestigation`. Until a step exists it shows as
+  "Not implemented yet" and scores 0, so verdicts rely on the model score: Gray cases go to an analyst and
+  model-confirmed cases stay confirmed.
+- **Verdict:** confidence = sigmoid((model points + step points) / 2). ≥ `Investigation:PhishingThreshold` (0.95) →
+  Confirmed, ≤ `BenignThreshold` (0.05) → Dismissed, otherwise **Needs analyst**. Analyst decisions are never overwritten.
+- **Step 4 (dummy credentials) is simulated.** DataGen records what a sandbox would see (accepts fake login, posts
+  the data to another host, silently forwards to the real brand). A real implementation must run in an isolated
+  browser sandbox, never on an analyst's machine, and follow the hackathon ground rules.
+- **Enforcement is draft-only.** Notices are filed by an analyst in the console; "filing" is simulated and nothing
+  is sent. Indicators are removed if a case is later marked benign. Open-redirect and brand-owned domains are never
+  blocked as a whole.
+- Set `Investigation:Enabled = false` on every machine except the one that runs the shared worker.
+
+### Analyst console (PhishGuard.Web)
+
+| Screen | What analysts do there |
+|---|---|
+| **Dashboard** `/` | Funnel from URLs scored → flagged → cases → needs analyst → takedown filed; cases by status; top brands |
+| **Review queue** `/cases` | Cases waiting for an analyst (tabs: investigating, confirmed, takedown filed, dismissed, all); search by domain |
+| **Case** `/cases/{id}` | The 7-step checklist with findings, domain evidence and sandbox results, campaign URLs (short links expanded), takedown notices, decision history; **Confirm phishing**, **Mark benign**, **Re-run investigation** |
+| **Takedown notices** `/enforcement` | Preview, **Approve & file** (simulated) or reject drafted notices |
+| **Block-list** `/indicators` | Indicators from confirmed cases; **Download CSV** |
+| **Dataset** `/dataset` | Synthetic dataset by category |
+
+URLs are always shown **defanged** (`hxxps://example[.]com`) and never as links. The signed-in analyst comes from
+`Analyst:Name` (default: Windows user name); replace with Entra ID sign-in before real use.
+
+Analyst API: `GET /api/dashboard`, `GET /api/cases`, `GET /api/cases/{id}`, `POST /api/cases/{id}/investigate`,
+`POST /api/cases/{id}/decision` (`{ "decision": "Phishing|Benign", "analyst": "...", "notes": "..." }`),
+`GET /api/notices`, `POST /api/notices/{id}/approve|reject`, `GET /api/indicators[?format=csv]`.
 ## Next phases
 
 1. **Agents:** Gray cases (`Status = AgentReview`) → Evidence / Brand / Verdict agents → Enforcement notice drafts (never sent).

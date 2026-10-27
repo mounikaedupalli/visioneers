@@ -38,19 +38,25 @@ public sealed class BulkLoader(string connectionString)
             nameof(DomainEvidence.RegistrarAbuseEmail), nameof(DomainEvidence.RegistrantCountry), nameof(DomainEvidence.PrivacyProtected),
             nameof(DomainEvidence.HostingProvider), nameof(DomainEvidence.HostingAbuseEmail), nameof(DomainEvidence.CertIssuer),
             nameof(DomainEvidence.CertIssuedOnUtc), nameof(DomainEvidence.PageTitle), nameof(DomainEvidence.HasLoginForm),
-            nameof(DomainEvidence.BrandLogoDetected), nameof(DomainEvidence.ScreenshotRef)
+            nameof(DomainEvidence.BrandLogoDetected), nameof(DomainEvidence.ScreenshotRef),
+            nameof(DomainEvidence.SandboxRunAtUtc), nameof(DomainEvidence.SandboxAcceptsAnyCredentials),
+            nameof(DomainEvidence.SandboxPostsToExternalHost), nameof(DomainEvidence.SandboxPostTarget),
+            nameof(DomainEvidence.SandboxRedirectsToBrand), nameof(DomainEvidence.BrandPageSimilarity)
         ];
         Type[] types =
         [
             typeof(string), typeof(DateTime), typeof(string), typeof(string), typeof(string), typeof(bool), typeof(string),
-            typeof(string), typeof(string), typeof(DateTime), typeof(string), typeof(bool), typeof(bool), typeof(string)
+            typeof(string), typeof(string), typeof(DateTime), typeof(string), typeof(bool), typeof(bool), typeof(string),
+            typeof(DateTime), typeof(bool), typeof(bool), typeof(string), typeof(bool), typeof(float)
         ];
         for (var i = 0; i < cols.Length; i++) table.Columns.Add(cols[i], types[i]);
 
         foreach (var e in evidence)
             table.Rows.Add(e.RegisteredDomain, N(e.CreatedOnUtc), N(e.Registrar), N(e.RegistrarAbuseEmail), N(e.RegistrantCountry),
                 e.PrivacyProtected, N(e.HostingProvider), N(e.HostingAbuseEmail), N(e.CertIssuer), N(e.CertIssuedOnUtc),
-                N(e.PageTitle), e.HasLoginForm, e.BrandLogoDetected, N(e.ScreenshotRef));
+                N(e.PageTitle), e.HasLoginForm, e.BrandLogoDetected, N(e.ScreenshotRef),
+                N(e.SandboxRunAtUtc), N(e.SandboxAcceptsAnyCredentials), N(e.SandboxPostsToExternalHost), N(e.SandboxPostTarget),
+                N(e.SandboxRedirectsToBrand), N(e.BrandPageSimilarity));
 
         await WriteAsync("DomainEvidence", table, ct);
     }

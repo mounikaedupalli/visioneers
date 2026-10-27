@@ -1,0 +1,15 @@
+<div class="card stat @(Accent ? "accent" : "")">
+    <div class="label">@Label</div>
+    <div class="value">@Value</div>
+    @if (!string.IsNullOrEmpty(Hint))
+    {
+        <div class="hint">@Hint</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public bool Accent { get; set; }
+}

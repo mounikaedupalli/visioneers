@@ -1,0 +1,74 @@
+@page "/indicators"
+@inject PhishGuardApiClient Api
+
+<PageTitle>Block-list · PhishGuard</PageTitle>
+
+<div class="page-head">
+    <div>
+        <h1>Block-list</h1>
+        <div class="muted">Indicators from confirmed cases. Removed automatically if a case is later marked benign.</div>
+    </div>
+    <a class="btn btn-primary" href="download/blocklist.csv" download>Download CSV</a>
+</div>
+
+<div class="tabs">
+    @foreach (var (value, label) in Tabs)
+    {
+        <button class="tab @(_type == value ? "active" : "")" @onclick="@(() => SwitchAsync(value))">@label</button>
+    }
+</div>
+
+@if (_error is not null)
+{
+    <div class="banner error">@_error</div>
+}
+else if (_page is null)
+{
+    <div class="empty">Loading…</div>
+}
+else if (_page.Items.Count == 0)
+{
+    <div class="card empty">No indicators yet.</div>
+}
+else
+{
+    <div class="card table-wrap" style="padding:4px 6px">
+        <table class="data">
+            <thead><tr><th>Type</th><th>Value (defanged)</th><th>Case</th><th>Added</th></tr></thead>
+            <tbody>
+                @foreach (var i in _page.Items)
+                {
+                    <tr>
+                        <td><Badge Text="@i.Type" Css="@(i.Type == "Domain" ? "b-bad" : "b-neutral")" /></td>
+                        <td class="mono">@Display.Defang(i.Value)</td>
+                        <td><a class="mono" href="cases/@i.CaseId">PG-@i.CaseId</a></td>
+                        <td class="small muted">@i.AddedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="pager">
+        <button class="btn btn-sm" disabled="@(_page.Page <= 1)" @onclick="() => LoadAsync(_page.Page - 1)">Previous</button>
+        <span class="muted small">@_page.Total.ToString("N0") indicator(s) · page @_page.Page</span>
+        <button class="btn btn-sm" disabled="@(_page.Page * _page.PageSize >= _page.Total)" @onclick="() => LoadAsync(_page.Page + 1)">Next</button>
+    </div>
+}
+
+@code {
+    private static readonly (string Value, string Label)[] Tabs = [("", "All"), ("Domain", "Domains"), ("Url", "URLs"), ("Ip", "IPs")];
+
+    private PagedResult<IndicatorDto>? _page;
+    private string _type = "";
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync(1);
+
+    private Task SwitchAsync(string type) { _type = type; return LoadAsync(1); }
+
+    private async Task LoadAsync(int page)
+    {
+        try { _page = await Api.GetIndicatorsAsync(_type, page); _error = null; }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+}

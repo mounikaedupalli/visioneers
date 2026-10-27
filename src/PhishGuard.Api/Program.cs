@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
+using PhishGuard.Agents;
+using PhishGuard.Agents.Investigation;
 using PhishGuard.Api;
 using PhishGuard.Core.Domain;
 using PhishGuard.Data;
@@ -8,6 +11,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 builder.AddSqlServerDbContext<PhishGuardDbContext>("phishguard");
 builder.Services.AddOpenApi();
+builder.Services.AddInvestigation(builder.Configuration.GetSection("Investigation").Get<InvestigationOptions>());
+// Enums as strings in requests and responses ("Phishing", not 1).
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
 
@@ -44,9 +50,9 @@ api.MapGet("/urls", async (PhishGuardDbContext db, UrlCategory? category, int pa
 api.MapGet("/evidence/{domain}", async (PhishGuardDbContext db, string domain) =>
     await db.DomainEvidence.FindAsync(domain) is { } e ? Results.Ok(e) : Results.NotFound());
 
-api.MapResultsEndpoints(); // /scoring/summary, /phishing, /campaigns, /campaigns/{id}
+api.MapResultsEndpoints();  // /scoring/summary, /phishing, /campaigns, /campaigns/{id}
+api.MapAnalystEndpoints();  // /dashboard, /cases, /cases/{id}, /cases/{id}/investigate, /cases/{id}/decision, /notices, /indicators
 
-// TODO (phase 4): /api/cases/{id}/decision, /api/cases/{id}/agents/run
 
 app.Run();
 

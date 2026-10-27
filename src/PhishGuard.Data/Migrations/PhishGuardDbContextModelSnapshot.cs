@@ -147,6 +147,9 @@ namespace PhishGuard.Data.Migrations
                     b.Property<bool>("BrandLogoDetected")
                         .HasColumnType("bit");
 
+                    b.Property<float?>("BrandPageSimilarity")
+                        .HasColumnType("real");
+
                     b.Property<DateTime?>("CertIssuedOnUtc")
                         .HasColumnType("datetime2");
 
@@ -186,6 +189,22 @@ namespace PhishGuard.Data.Migrations
                     b.Property<string>("RegistrarAbuseEmail")
                         .HasMaxLength(254)
                         .HasColumnType("nvarchar(254)");
+
+                    b.Property<bool?>("SandboxAcceptsAnyCredentials")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("SandboxPostTarget")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool?>("SandboxPostsToExternalHost")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("SandboxRedirectsToBrand")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("SandboxRunAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ScreenshotRef")
                         .HasMaxLength(500)
@@ -242,6 +261,45 @@ namespace PhishGuard.Data.Migrations
                     b.HasIndex("CaseId");
 
                     b.ToTable("EnforcementNotices", (string)null);
+                });
+
+            modelBuilder.Entity("PhishGuard.Core.Domain.Indicator", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("AddedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("CaseId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(800)
+                        .HasColumnType("nvarchar(800)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CaseId");
+
+                    b.HasIndex("Type", "Value")
+                        .IsUnique();
+
+                    b.ToTable("Indicators", (string)null);
                 });
 
             modelBuilder.Entity("PhishGuard.Core.Domain.MonitorCheck", b =>

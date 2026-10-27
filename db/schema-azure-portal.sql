@@ -398,4 +398,93 @@ BEGIN
     VALUES (N'20261027144342_AddShortLinks', N'9.0.21');
 END;
 
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    ALTER TABLE [DomainEvidence] ADD [BrandPageSimilarity] real NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    ALTER TABLE [DomainEvidence] ADD [SandboxAcceptsAnyCredentials] bit NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    ALTER TABLE [DomainEvidence] ADD [SandboxPostTarget] nvarchar(500) NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    ALTER TABLE [DomainEvidence] ADD [SandboxPostsToExternalHost] bit NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    ALTER TABLE [DomainEvidence] ADD [SandboxRedirectsToBrand] bit NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    ALTER TABLE [DomainEvidence] ADD [SandboxRunAtUtc] datetime2 NULL;
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    CREATE TABLE [Indicators] (
+        [Id] bigint NOT NULL IDENTITY,
+        [Type] nvarchar(40) NOT NULL,
+        [Value] nvarchar(800) NOT NULL,
+        [CaseId] bigint NOT NULL,
+        [Source] nvarchar(100) NOT NULL,
+        [AddedAtUtc] datetime2 NOT NULL,
+        CONSTRAINT [PK_Indicators] PRIMARY KEY ([Id])
+    );
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    CREATE INDEX [IX_Indicators_CaseId] ON [Indicators] ([CaseId]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    CREATE UNIQUE INDEX [IX_Indicators_Type_Value] ON [Indicators] ([Type], [Value]);
+END;
+
+IF NOT EXISTS (
+    SELECT * FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20261027175321_AddInvestigation'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20261027175321_AddInvestigation', N'9.0.21');
+END;
+
 COMMIT;

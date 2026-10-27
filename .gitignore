@@ -487,3 +487,7 @@ $RECYCLE.BIN/
 # Generated datasets and downloaded feeds (regenerate with PhishGuard.DataGen)
 data/
 
+
+# Local Claude Code launch config (machine-specific paths)
+.claude/
+
