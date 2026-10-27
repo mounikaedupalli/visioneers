@@ -1,0 +1,21 @@
+{
+  "Version": "lgbm-20261027-0918",
+  "TrainedAtUtc": "2026-10-27T09:18:43.8624697Z",
+  "Bands": {
+    "ClearThreshold": 0.06117115,
+    "ConfirmThreshold": 0.6614374,
+    "TargetRecall": 0.98,
+    "TargetPrecision": 0.995
+  },
+  "TrainRows": 300000,
+  "TestRows": 150000,
+  "Metrics": {
+    "recall_new_domains": 0.902638762511374,
+    "pr_auc": 0.989511094762059,
+    "roc_auc": 0.9995921252420699,
+    "recall": 0.898503740648379,
+    "flagged_fp_rate": 0.01718494271685761,
+    "gray_per_day": 2070,
+    "confirmed_precision": 0.9991326973113617
+  }
+}

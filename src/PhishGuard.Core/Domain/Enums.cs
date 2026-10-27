@@ -13,6 +13,10 @@ public enum UrlCategory
     BenignTracking = 3,       // marketing / email click-tracking links
     BenignCdn = 4,            // CDN asset URLs with hashes
     BenignBrandSubdomain = 5, // a brand's own real subdomains (login.microsoftonline.com ...)
+    // Hard mode (--difficulty hard): benign URLs that carry the signals phishing usually has
+    BenignLoginPortal = 6,    // real login/billing/verify pages on ordinary sites (portal.smallbiz.com/account/login.php)
+    BenignLookalikeName = 7,  // unrelated businesses whose name contains a brand word (applegrovefarm.com, chasebakery.net)
+    BenignFreeHosting = 8,    // legitimate projects on free hosting (my-portfolio.github.io, team-docs.web.app)
 
     // ---- Phishing (Label = true) ----
     Typosquat = 100,          // paypa1.com, amazom.com
@@ -27,6 +31,7 @@ public enum UrlCategory
     CompromisedSite = 109,    // oldsmallbiz.com/wp-includes/.../office365/
     EncodedLongUrl = 110,     // base64 / percent-encoded payloads padded to ~256 chars
     Shortener = 111,          // bit.ly-style short links (label taken from ground truth)
+    StealthKit = 112,         // hard mode: neutral-looking domain and path, no brand or lure words in the URL at all
     FeedReal = 199            // imported from a public threat feed (real-world sample)
 }
 

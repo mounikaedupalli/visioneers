@@ -52,6 +52,23 @@ internal static class WordLists
         "office/owa/index.html", "invoice/view.php", "delivery/reschedule.php", "unlock/account.html"
     ];
 
+    /// <summary>Hard mode: kit paths with no lure words (look like any ordinary page).</summary>
+    public static readonly string[] NeutralPaths =
+    [
+        "index.html", "home", "app/", "main.html", "view/document", "docs/share", "files/download", "en/", "pages/start",
+        "dashboard", "content/view.html", "s/", "default.aspx", "start", "info/page.php", "doc/preview"
+    ];
+
+    /// <summary>Hard mode: real login / billing pages on ordinary sites (overlap with lure paths on purpose).</summary>
+    public static readonly string[] BenignLoginPaths =
+    [
+        "account/login.php", "login", "signin", "secure/verify-email", "billing/update-payment", "account/password-reset",
+        "auth/verify", "user/confirm", "members/login.aspx", "account/security", "session/new", "customer/portal/login"
+    ];
+
+    /// <summary>Hard mode: everyday words that are also (part of) protected brand keywords.</summary>
+    public static readonly string[] LookalikeWords = ["apple", "chase", "prime", "meta", "outlook", "wells", "icloud"];
+
     public static readonly string[] CheapTlds = ["com", "net", "org", "info", "xyz", "top", "online", "site", "live", "shop", "click", "support", "icu", "cfd", "sbs", "co", "io", "me"];
     public static readonly string[] BenignTlds = ["com", "com", "com", "com", "net", "org", "io", "co", "co.uk", "de", "in", "com.au", "ca", "fr", "nl"];
 

@@ -60,7 +60,7 @@ dotnet run --project src/PhishGuard.Training
 dotnet run --project src/PhishGuard.AppHost   # Scoring scores everything on start-up
 ```
 
-DataGen options: `--count 500000 --phish-rate 0.02 --seed 42 --days 14 --reset --csv data/urls.csv`
+DataGen options: `--count 500000 --phish-rate 0.02 --seed 42 --days 14 --reset --csv data/urls.csv --difficulty normal|hard`
 `--download-feeds` (OpenPhish, PhishStats, Tranco → `data/feeds/`) `--feeds-dir <dir>` `--feed-share 0.3`.
 The 500K run takes about 30 seconds on LocalDB.
 
@@ -84,6 +84,41 @@ The Scoring worker picks up a retrained model automatically and scores every URL
   time-based train/test split measures how the model handles a tactic it has not seen.
 - `DomainEvidence` simulates RDAP/WHOIS, certificate transparency and a sandboxed page snapshot, so agents gather
   evidence without opening any suspected site. Feed URLs are only ever read as text.
+
+## Hard dataset (`--difficulty hard`)
+
+The normal dataset is too easy: phishing paths use lure words and benign URLs almost never do, so URL structure
+alone is enough. Hard mode blurs those signals (the normal dataset is unchanged — same seed, same URLs):
+
+- **Benign look-alikes:** real login / billing / verify pages on ordinary sites (`BenignLoginPortal`), unrelated
+  businesses whose name contains a brand word (`BenignLookalikeName`), legitimate projects on free hosting (`BenignFreeHosting`).
+- **Quieter phishing:** half of all kits use neutral paths (`index.html`, `view/document`) instead of lure words;
+  `StealthKit` campaigns have no brand or lure word in the URL at all; victim tokens look like ordinary query strings.
+- **Kit reuse:** some campaigns redeploy the same kit path on fresh domains (path-brand, compromised, encoded, stealth).
+
+Try it without touching the shared database by pointing at a separate LocalDB database:
+
+```bash
+setx ConnectionStrings__phishguard "Server=(localdb)\MSSQLLocalDB;Database=PhishGuardHard;Trusted_Connection=True;TrustServerCertificate=True"
+dotnet run --project src/PhishGuard.DataGen -- --difficulty hard --reset
+dotnet run --project src/PhishGuard.Training -- --out models/hard
+```
+
+Results on 500K hard URLs (full report: [models/hard/training-report.md](models/hard/training-report.md)):
+
+| | Current model (trained on normal data) | Baseline retrained on hard | PhishGuard retrained on hard |
+|---|---|---|---|
+| Recall | 68.8% (all rows) | 99.6% | 89.9% |
+| Harmless share of flagged URLs | 25.1% | 80.0% | **1.7%** |
+| Sent to review per day (1.5M/day) | — | 165,620 | **2,070** |
+| False positives at 95% / 98% recall | — | 14% / 40% | **8% / 11%** |
+
+The brand-aware features and character n-grams are what keep false positives down once lure words stop being a
+giveaway. Remaining weak spots: homoglyphs that only appear late (48% caught), shorteners (destination unknown).
+`StealthKit` is caught 86% of the time partly because its neutral paths still differ from benign path vocabulary —
+a synthetic-data artefact; real stealth kits would need evidence/agents (domain age, page content).
+
+To score with the hard model, set `Scoring:ModelDirectory` to `models/hard`.
 
 ## Schema (SQL Server)
 
