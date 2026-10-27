@@ -55,4 +55,31 @@ public class UrlFeatureExtractorTests
     [Fact]
     public void Edit_distance_catches_one_letter_typo() =>
         Assert.Equal(1, F("https://paypa1.example/", "MinBrandEditDistance"));
+
+    [Theory]
+    [InlineData("раураl")]   // Cyrillic р а у а
+    [InlineData("pаypаl")]   // Cyrillic а
+    [InlineData("paypaӏ")]   // Cyrillic palochka for l
+    [InlineData("ꮲaypal")]   // unknown look-alike: skeleton distance still 1
+    public void Homoglyph_domains_fold_to_the_brand(string label)
+    {
+        var url = "https://" + new System.Globalization.IdnMapping().GetAscii(label) + ".com/";
+        Assert.True(F(url, "SkeletonBrandDistance") <= 1);
+    }
+
+    [Fact]
+    public void Homoglyph_check_uses_registered_label_not_www()
+    {
+        var url = "https://www." + new System.Globalization.IdnMapping().GetAscii("pаypаl") + ".com/";
+        Assert.Equal(1, F(url, "HomoglyphMapsToBrand"));
+        Assert.Equal(1, F(url, "MixedScriptLabel"));
+    }
+
+    [Fact]
+    public void Plain_latin_domain_is_not_mixed_script() =>
+        Assert.Equal(0, F("https://www.example.com/", "MixedScriptLabel"));
+
+    [Fact]
+    public void Confusables_skeleton_strips_accents_and_fullwidth() =>
+        Assert.Equal("paypal", Confusables.Skeleton("ｐáypal"));
 }

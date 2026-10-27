@@ -55,6 +55,16 @@ public sealed class BulkLoader(string connectionString)
         await WriteAsync("DomainEvidence", table, ct);
     }
 
+    public async Task LoadShortLinksAsync(IEnumerable<ShortLink> links, CancellationToken ct = default)
+    {
+        var table = new DataTable();
+        table.Columns.Add(nameof(ShortLink.ShortUrl), typeof(string));
+        table.Columns.Add(nameof(ShortLink.ExpandedUrl), typeof(string));
+        table.Columns.Add(nameof(ShortLink.ExpandedAtUtc), typeof(DateTime));
+        foreach (var l in links) table.Rows.Add(Truncate(l.ShortUrl, 400), Truncate(l.ExpandedUrl, 2048), l.ExpandedAtUtc);
+        if (table.Rows.Count > 0) await WriteAsync("ShortLinks", table, ct);
+    }
+
     public async Task LoadScoresAsync(IEnumerable<UrlScore> scores, CancellationToken ct = default)
     {
         var table = new DataTable();

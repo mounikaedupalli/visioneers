@@ -10,7 +10,10 @@ public enum DomainOwner { Legit, Attacker, Compromised, AttackerOnPlatform }
 
 /// <param name="Day">Days after the start of the window the URL was seen; null = caller picks a time.</param>
 /// <param name="CampaignId">Ground-truth attacker campaign (for checking how well grouping works); null for benign.</param>
-public sealed record GeneratedUrl(string Url, UrlCategory Category, int? BrandId, DomainOwner Owner, double? Day = null, int? CampaignId = null);
+/// <param name="ExpandedUrl">For short links: where the link really points (simulated shortener expand API).</param>
+/// <param name="ExpandedOwner">Who controls the destination domain (drives its simulated evidence).</param>
+public sealed record GeneratedUrl(string Url, UrlCategory Category, int? BrandId, DomainOwner Owner, double? Day = null, int? CampaignId = null,
+    string? ExpandedUrl = null, DomainOwner? ExpandedOwner = null);
 
 /// <summary>
 /// Generates labelled URLs for every case in <see cref="UrlCategory"/>.
@@ -21,6 +24,9 @@ public sealed record GeneratedUrl(string Url, UrlCategory Category, int? BrandId
 public sealed class SyntheticUrlGenerator
 {
     private readonly Random _rng;
+    private readonly int _seed;
+    private SyntheticUrlGenerator? _destinations;
+    private HashSet<string>? _benignSet;
     private readonly IReadOnlyList<ProtectedBrand> _brands;
     private readonly string[] _benignDomains;
     private readonly IdnMapping _idn = new();
@@ -91,6 +97,7 @@ public sealed class SyntheticUrlGenerator
     public SyntheticUrlGenerator(int seed, IReadOnlyList<ProtectedBrand> brands, IEnumerable<string>? extraBenignDomains = null, int benignDomainPool = 20_000)
     {
         _rng = new Random(seed);
+        _seed = seed;
         _brands = brands;
         var pool = new HashSet<string>(PopularDomains, StringComparer.OrdinalIgnoreCase);
         foreach (var d in extraBenignDomains ?? []) pool.Add(d);
@@ -108,10 +115,10 @@ public sealed class SyntheticUrlGenerator
 
     public GeneratedUrl Generate(UrlCategory category) => category switch
     {
-        UrlCategory.BenignPlain => Benign(category, $"{Scheme(0.92)}{Www()}{Pick(_benignDomains)}/{Path(0, 4)}{MaybeQuery(0.3)}"),
+        UrlCategory.BenignPlain => Benign(category, $"{Scheme(0.92)}{Www()}{Pick(_benignDomains)}/{(Hard && _rng.NextDouble() < 0.25 ? Pick(NeutralPaths) : Path(0, 4))}{MaybeQuery(0.3)}"),
         UrlCategory.BenignLongSso => Benign(category, LongSso()),
         UrlCategory.BenignSharePoint => Benign(category, ShareLink()),
-        UrlCategory.BenignTracking => Benign(category, TrackingLink()),
+        UrlCategory.BenignTracking => _rng.NextDouble() < 0.1 ? BenignShortLink() : Benign(category, TrackingLink()),
         UrlCategory.BenignCdn => Benign(category, CdnLink()),
         UrlCategory.BenignBrandSubdomain => BrandOwned(),
 
@@ -126,13 +133,13 @@ public sealed class SyntheticUrlGenerator
         UrlCategory.IpHost => WithBrand(category, b => $"http://{Ip()}{(_rng.NextDouble() < 0.3 ? ":" + Pick(["8080", "8443", "2096", "8888"]) : "")}/{Keyword(b)}/{KitPath()}", DomainOwner.Attacker),
         UrlCategory.CompromisedSite => WithBrand(category, Compromised, DomainOwner.Compromised),
         UrlCategory.EncodedLongUrl => WithBrand(category, EncodedLong, DomainOwner.Attacker),
-        UrlCategory.Shortener => WithBrand(category, _ => $"https://{Pick(Shorteners)}/{Token(6, 8, alnum: true)}", DomainOwner.Legit),
+        UrlCategory.Shortener => ShortenerPhish(),
 
         // hard mode
         UrlCategory.BenignLoginPortal => Benign(category, $"https://{Pick(["portal", "my", "account", "secure", "login", "app", "members"])}.{Pick(_benignDomains)}/{Pick(BenignLoginPaths)}{MaybeQuery(0.5)}"),
         UrlCategory.BenignLookalikeName => Benign(category, $"{Scheme(0.9)}{Www()}{Pick(LookalikeWords)}{Pick(Nouns)}.{Pick(BenignTlds)}/{Path(0, 3)}{MaybeQuery(0.3)}"),
         UrlCategory.BenignFreeHosting => Benign(category, $"https://{Pick(Nouns)}-{Pick(Nouns)}{(_rng.NextDouble() < 0.5 ? _rng.Next(1, 99).ToString() : "")}.{Pick(FreeHostSuffixes)}/{Path(0, 2)}"),
-        UrlCategory.StealthKit => WithBrand(category, _ => $"https://{Www(0.5)}{RandomBusinessDomain()}/{Pick(NeutralPaths)}{MaybeQuery(0.4)}", DomainOwner.Attacker),
+        UrlCategory.StealthKit => WithBrand(category, _ => $"https://{Www(0.5)}{FreshBusinessDomain()}/{Pick(NeutralPaths)}{MaybeQuery(0.4)}", DomainOwner.Attacker),
         _ => throw new ArgumentOutOfRangeException(nameof(category), category, "Not a synthetic category")
     };
 
@@ -200,8 +207,36 @@ public sealed class SyntheticUrlGenerator
     }
 
     /// <summary>Benign short links too, so "is a shortener" alone can't be a perfect phishing signal.</summary>
-    public GeneratedUrl BenignShortLink() =>
-        Benign(UrlCategory.BenignTracking, $"https://{Pick(Shorteners)}/{Token(6, 8, alnum: true)}");
+    public GeneratedUrl BenignShortLink()
+    {
+        var link = Benign(UrlCategory.BenignTracking, $"https://{Pick(Shorteners)}/{Token(6, 8, alnum: true)}");
+        var dest = Destinations.Generate(Destinations.Pick(BenignShortTargets));
+        return link with { ExpandedUrl = dest.Url, ExpandedOwner = DomainOwner.Legit };
+    }
+
+    /// <summary>Phishing behind a shortener: the short link is on bit.ly etc., the destination is an ordinary kit.</summary>
+    private GeneratedUrl ShortenerPhish()
+    {
+        var link = WithBrand(UrlCategory.Shortener, _ => $"https://{Pick(Shorteners)}/{Token(6, 8, alnum: true)}", DomainOwner.Legit);
+        var dest = Destinations.Generate(Destinations.Pick(Hard ? [.. PhishShortTargets, UrlCategory.StealthKit] : PhishShortTargets));
+        return link with { BrandId = dest.BrandId, ExpandedUrl = dest.Url, ExpandedOwner = dest.Owner };
+    }
+
+    private static readonly UrlCategory[] PhishShortTargets =
+    [
+        UrlCategory.Combosquat, UrlCategory.Typosquat, UrlCategory.SubdomainBrand, UrlCategory.PathBrand,
+        UrlCategory.FreeHosting, UrlCategory.CompromisedSite
+    ];
+
+    private static readonly UrlCategory[] BenignShortTargets =
+        [UrlCategory.BenignPlain, UrlCategory.BenignPlain, UrlCategory.BenignSharePoint, UrlCategory.BenignCdn];
+
+    /// <summary>
+    /// Separate generator (own seed, same benign domain pool) for short-link destinations, so adding
+    /// expansions doesn't shift the main random sequence: the same seed still gives the same URLs.
+    /// </summary>
+    private SyntheticUrlGenerator Destinations => _destinations ??=
+        new SyntheticUrlGenerator(_seed + 7919, _brands, _benignDomains, _benignDomains.Length) { Hard = Hard, WindowDays = WindowDays };
 
     // ---------------- benign ----------------
 
@@ -241,7 +276,6 @@ public sealed class SyntheticUrlGenerator
 
     private string TrackingLink()
     {
-        if (_rng.NextDouble() < 0.1) return BenignShortLink().Url;
         var d = Pick(_benignDomains);
         return Pick<Func<string>>(
         [
@@ -371,6 +405,15 @@ public sealed class SyntheticUrlGenerator
     private string CompromisedSiteName() => $"{Pick(Nouns)}{Pick(Nouns)}{Pick(["", "llc", "co", "inc"])}.{Pick(BenignTlds)}";
 
     private string Keyword(ProtectedBrand b) => b.Keywords.Split(',')[_rng.NextDouble() < 0.8 ? 0 : _rng.Next(b.Keywords.Split(',').Length)].Trim();
+
+    /// <summary>A business-looking domain the attacker registered: never one of the benign pool's real sites.</summary>
+    private string FreshBusinessDomain()
+    {
+        _benignSet ??= new HashSet<string>(_benignDomains, StringComparer.OrdinalIgnoreCase);
+        string d;
+        do d = RandomBusinessDomain(); while (_benignSet.Contains(d));
+        return d;
+    }
 
     public string RandomBusinessDomain() => $"{Pick(Nouns)}{Pick(Nouns)}{(_rng.NextDouble() < 0.3 ? _rng.Next(1, 99).ToString() : "")}.{Pick(BenignTlds)}";
 

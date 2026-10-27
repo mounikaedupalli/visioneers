@@ -77,6 +77,8 @@ var start = asOf.AddDays(-opts.Days);
 var records = new List<UrlRecord>(generated.Count);
 var observations = new List<(string, DomainOwner, int?, bool)>(generated.Count);
 var feedSourceByUrl = feedUrls.ToDictionary(f => f.Url, f => f.SourceFile);
+var shortLinks = new Dictionary<string, ShortLink>(StringComparer.Ordinal);
+var loginPageDomains = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 var skipped = 0;
 
 foreach (var g in generated.OrderBy(_ => rng.Next()))
@@ -97,6 +99,14 @@ foreach (var g in generated.OrderBy(_ => rng.Next()))
         IngestedAtUtc = ingested
     });
     observations.Add((p.RegisteredDomain, g.Owner, g.BrandId, p.IsIpHost));
+    if (g.Category == UrlCategory.BenignLoginPortal) loginPageDomains.Add(p.RegisteredDomain);
+
+    // Short link: record its destination (simulated expand API) and give the destination domain its own evidence.
+    if (g.ExpandedUrl is not null && UrlParser.TryParse(g.ExpandedUrl, out var dest))
+    {
+        shortLinks.TryAdd(g.Url, new ShortLink { ShortUrl = g.Url, ExpandedUrl = g.ExpandedUrl, ExpandedAtUtc = ingested });
+        observations.Add((dest.RegisteredDomain, g.ExpandedOwner ?? DomainOwner.Legit, g.BrandId, dest.IsIpHost));
+    }
 }
 records.Sort((a, b) => a.IngestedAtUtc.CompareTo(b.IngestedAtUtc));
 Console.WriteLine($"Generated {records.Count:N0} URLs in {sw.Elapsed.TotalSeconds:F1}s ({skipped} unparseable skipped)");
@@ -106,13 +116,15 @@ if (campaignSizes.Count > 0)
                       $"{campaignSizes.Count(s => s == 1):N0} single-URL); phishing registered domains: " +
                       $"{records.Where(r => r.IsPhishing).Select(r => r.RegisteredDomain).Distinct().Count():N0}");
 
-var evidence = new EvidenceGenerator(opts.Seed + 2, brands, asOf).Build(observations).ToList();
-Console.WriteLine($"Generated evidence for {evidence.Count:N0} registered domains");
+var evidence = new EvidenceGenerator(opts.Seed + 2, brands, asOf) { Hard = opts.Hard, LoginPageDomains = loginPageDomains }
+    .Build(observations).ToList();
+Console.WriteLine($"Generated evidence for {evidence.Count:N0} registered domains; {shortLinks.Count:N0} short links with destinations");
 
 // 4. Load
 var loader = new BulkLoader(connectionString);
 await loader.LoadUrlsAsync(records);
 await loader.LoadEvidenceAsync(evidence);
+await loader.LoadShortLinksAsync(shortLinks.Values);
 Console.WriteLine($"Loaded into SQL Server in {sw.Elapsed.TotalSeconds:F1}s total");
 
 if (opts.CsvPath is not null)

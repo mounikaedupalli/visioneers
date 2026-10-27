@@ -21,7 +21,7 @@ public sealed class UrlFeatureExtractor
         "Base64LikeToken",
         "BrandInRegisteredDomain", "BrandInSubdomain", "BrandInPath", "BrandOwnedDomain",
         "MinBrandEditDistance", "BrandEditDistanceRatio", "BrandWithHyphenWords", "HomoglyphMapsToBrand",
-        "BrandMismatch", "TldIsCom", "VowelRatioDomain"
+        "BrandMismatch", "TldIsCom", "VowelRatioDomain", "MixedScriptLabel", "SkeletonBrandDistance"
     ];
 
     public static int Count => Names.Length;
@@ -48,13 +48,6 @@ public sealed class UrlFeatureExtractor
 
     private static readonly string[] RedirectParams = [ "url=", "redirect=", "redirect_uri=", "next=", "u=", "q=", "dest=", "continue=", "target=", "goto=" ];
 
-    private static readonly Dictionary<char, char> Homoglyphs = new()
-    {
-        ['0'] = 'o', ['1'] = 'l', ['3'] = 'e', ['4'] = 'a', ['5'] = 's', ['7'] = 't', ['8'] = 'b',
-        ['а'] = 'a', ['е'] = 'e', ['о'] = 'o', ['р'] = 'p', ['с'] = 'c', ['у'] = 'y', ['х'] = 'x', ['і'] = 'i',
-        ['ӏ'] = 'l', ['ԁ'] = 'd', ['ɡ'] = 'g', ['ο'] = 'o', ['α'] = 'a', ['ν'] = 'v', ['ı'] = 'i'
-    };
-
     private readonly List<(ProtectedBrand Brand, string[] Keywords, HashSet<string> Owned)> _brands;
 
     public UrlFeatureExtractor(IEnumerable<ProtectedBrand> brands)
@@ -72,7 +65,6 @@ public sealed class UrlFeatureExtractor
 
         var lower = url.ToLowerInvariant();
         var hostLabel = p.RegisteredDomain.Split('.')[0];
-        var unicodeHost = ToUnicode(p.Host);
         var i = 0;
 
         f[i++] = url.Length;
@@ -111,9 +103,11 @@ public sealed class UrlFeatureExtractor
         var inSub = _brands.Any(b => b.Keywords.Any(k => p.Subdomain.Contains(k, StringComparison.OrdinalIgnoreCase)));
         var inPath = _brands.Any(b => b.Keywords.Any(k => (p.Path + "?" + p.Query).Contains(k, StringComparison.OrdinalIgnoreCase)));
         var (minDist, ratio) = ClosestBrand(hostLabel);
-        var normalized = NormalizeHomoglyphs(unicodeHost.Split('.')[0]);
-        var homoglyphHit = normalized != unicodeHost.Split('.')[0] &&
-                           _brands.Any(b => b.Keywords.Any(k => normalized.Contains(k, StringComparison.Ordinal)));
+        var unicodeLabel = ToUnicode(p.RegisteredDomain).Split('.')[0]; // registered label, not "www"
+        var skeleton = Confusables.Skeleton(unicodeLabel);
+        var homoglyphHit = (Confusables.HasConfusable(unicodeLabel) || skeleton != unicodeLabel.ToLowerInvariant()) &&
+                           _brands.Any(b => b.Keywords.Any(k => skeleton.Contains(k, StringComparison.Ordinal)));
+        var (skeletonDist, _) = ClosestBrand(skeleton);
 
         f[i++] = inRegistered ? 1 : 0;
         f[i++] = inSub ? 1 : 0;
@@ -126,6 +120,8 @@ public sealed class UrlFeatureExtractor
         f[i++] = (inRegistered || inSub || inPath || homoglyphHit || minDist is > 0 and <= 2) && !owned ? 1 : 0;
         f[i++] = p.Tld == "com" ? 1 : 0;
         f[i++] = hostLabel.Length == 0 ? 0 : (float)hostLabel.Count(c => "aeiou".Contains(c)) / hostLabel.Length;
+        f[i++] = Confusables.IsMixedScript(unicodeLabel) ? 1 : 0;
+        f[i++] = owned ? 99 : Math.Min(skeletonDist, 10);
 
         return f;
     }
@@ -139,7 +135,7 @@ public sealed class UrlFeatureExtractor
     {
         if (!UrlParser.TryParse(url, out var p)) return null;
         var hostLabel = p.RegisteredDomain.Split('.')[0];
-        var normalized = NormalizeHomoglyphs(ToUnicode(p.Host).Split('.')[0]);
+        var normalized = Confusables.Skeleton(ToUnicode(p.RegisteredDomain).Split('.')[0]);
         var rest = Uri.UnescapeDataString(p.Subdomain + "/" + p.Path + "?" + p.Query);
 
         foreach (var (brand, keywords, owned) in _brands)
@@ -180,9 +176,6 @@ public sealed class UrlFeatureExtractor
         try { return new System.Globalization.IdnMapping().GetUnicode(host); }
         catch (ArgumentException) { return host; }
     }
-
-    private static string NormalizeHomoglyphs(string s) =>
-        new(s.Select(c => Homoglyphs.TryGetValue(c, out var r) ? r : c).ToArray());
 
     private static IEnumerable<string> Tokens(string s) =>
         s.Split(['/', '?', '&', '=', '.', '-', '_', ':', '#', '@'], StringSplitOptions.RemoveEmptyEntries);

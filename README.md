@@ -1,4 +1,4 @@
-﻿# PhishGuard
+# PhishGuard
 
 Hackathon solution for CSC DBS Problem 3 (phishing takedowns). It identifies real phishing URLs among a
 high volume of incoming URLs while cutting the false positives analysts review by hand.
@@ -39,7 +39,8 @@ To connect you need:
    plus `db_datareader` / `db_datawriter` role membership (and `db_ddladmin` to run migrations).
 2. A firewall rule for your public IP (Portal → SQL servers → phishguard-sql-visioneers → Networking).
 
-Tables were created from `db/schema-azure-portal.sql`. Shared-database rules:
+Tables were created from `db/schema-azure-portal.sql`. **Re-run it after pulling schema changes** (e.g. the
+`ShortLinks` table): it is idempotent and only applies migrations Azure doesn't have yet. Shared-database rules:
 - **Never run DataGen with `--reset` against Azure**: it drops the database, and EF could recreate it on a paid tier.
 - **Run only one Scoring worker** for the team; others should stop the `scoring` resource in the Aspire dashboard.
 
@@ -64,10 +65,13 @@ DataGen options: `--count 500000 --phish-rate 0.02 --seed 42 --days 14 --reset -
 `--download-feeds` (OpenPhish, PhishStats, Tranco → `data/feeds/`) `--feeds-dir <dir>` `--feed-share 0.3`.
 The 500K run takes about 30 seconds on LocalDB.
 
-Training options: `--iterations 300 --target-recall 0.98 --target-precision 0.995 --max-clear 0.5 --out models --daily-volume 1500000`.
-It takes about 3 minutes and splits by time: oldest 60% to fit, next 10% to choose thresholds, newest 30% to test.
+Training options: `--iterations 300 --target-recall 0.98 --target-precision 0.995 --max-clear 0.5 --min-confirm 0.9 --out models --daily-volume 1500000`.
+It takes about 5 minutes and splits by time: oldest 60% to fit, next 10% to choose thresholds, newest 30% to test.
+It trains three models and saves the last one: the lexical **baseline**, **PhishGuard URL-only**, and
+**PhishGuard + evidence** (42 URL features + 8 domain-evidence features + character n-grams).
 Thresholds are chosen on phishing from domains **not** seen during fitting (repeat campaign domains are easy and would
-push the Clear threshold close to 1.0), and the Clear threshold is capped at `--max-clear`.
+push the Clear threshold close to 1.0). Two safety limits keep a real Gray band: never auto-clear at or above
+`--max-clear`, never auto-confirm below `--min-confirm`.
 The Scoring worker picks up a retrained model automatically and scores every URL again under the new version.
 
 ## Dataset design
@@ -84,6 +88,8 @@ The Scoring worker picks up a retrained model automatically and scores every URL
   time-based train/test split measures how the model handles a tactic it has not seen.
 - `DomainEvidence` simulates RDAP/WHOIS, certificate transparency and a sandboxed page snapshot, so agents gather
   evidence without opening any suspected site. Feed URLs are only ever read as text.
+- `ShortLinks` simulates a shortener's expand API (e.g. bit.ly `/v4/expand`): short link → destination. Training and
+  Scoring judge the **destination**, and campaigns are grouped by where links really lead. Nobody visits the target.
 
 ## Hard dataset (`--difficulty hard`)
 
@@ -104,21 +110,31 @@ dotnet run --project src/PhishGuard.DataGen -- --difficulty hard --reset
 dotnet run --project src/PhishGuard.Training -- --out models/hard
 ```
 
-Results on 500K hard URLs (full report: [models/hard/training-report.md](models/hard/training-report.md)):
+Results on 500K hard URLs, test set = newest 150K (full report: [models/hard/training-report.md](models/hard/training-report.md)):
 
-| | Current model (trained on normal data) | Baseline retrained on hard | PhishGuard retrained on hard |
+| | Baseline (URL structure) | PhishGuard URL-only | PhishGuard + evidence |
 |---|---|---|---|
-| Recall | 68.8% (all rows) | 99.6% | 89.9% |
-| Harmless share of flagged URLs | 25.1% | 80.0% | **1.7%** |
-| Sent to review per day (1.5M/day) | — | 165,620 | **2,070** |
-| False positives at 95% / 98% recall | — | 14% / 40% | **8% / 11%** |
+| Recall | 95.2% | 94.5% | 92.2% |
+| Harmless share of flagged URLs | 68.5% | 62.8% | **0.1%** |
+| Sent to review per day (1.5M/day) | 104,890 | 83,720 | **4,840** |
+| False positives at 95% / 98% recall | 68% / 94% | 65% / 75% | **1% / 6%** |
 
-The brand-aware features and character n-grams are what keep false positives down once lure words stop being a
-giveaway. Remaining weak spots: homoglyphs that only appear late (48% caught), shorteners (destination unknown).
-`StealthKit` is caught 86% of the time partly because its neutral paths still differ from benign path vocabulary —
-a synthetic-data artefact; real stealth kits would need evidence/agents (domain age, page content).
+### Weak spots addressed
 
-To score with the hard model, set `Scoring:ModelDirectory` to `models/hard`.
+| Weak spot | Before | After | How |
+|---|---|---|---|
+| Homoglyphs (appear only late) | 48% | **99.8%** | Confusable-character skeleton (`Confusables`, TR39-style) + mixed-script flag; homoglyph checks now use the registered label, not `www` |
+| Shorteners | 9.5% | **95.6%** URL-only / 34.2% with evidence* | Simulated expand API (`ShortLinks`): the model judges the destination, campaigns group by it |
+| StealthKit (no brand or lure word) | 86% via a data artefact | **84.8%** for the right reason | Removed the artefact (benign pages also use neutral paths); added domain-evidence features (domain/cert age, free cert, privacy, login form, logo) |
+
+\* 104 of the 158 test-period phishing short links lead to a single stealth page; the evidence model misses that one
+campaign and catches the other short-link campaigns. The real remaining gap is stealth kits on **aged** domains,
+where neither the URL nor the evidence looks suspicious — the case for agents (page content, kit fingerprints).
+
+Other remaining gaps: long encoded URLs that only appear late (73% with evidence; the lexical baseline catches 100%),
+and the evidence model's lower overall recall (92.2%) in exchange for far fewer false positives.
+To score with the hard model, set `Scoring:ModelDirectory` to `models/hard`. Scoring refuses a model trained with a
+different feature layout (it checks `FeatureCount` in `model.json`) and logs what to do.
 
 ## Schema (SQL Server)
 
