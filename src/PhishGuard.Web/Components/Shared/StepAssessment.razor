@@ -1,21 +1,31 @@
 @using System.Globalization
 @inject PhishGuardApiClient Api
 
-<div class="step lvl-@Step.Level">
+<div class="step lvl-@Step.Level @(Locked ? "locked" : "")">
     <div class="step-num">@Step.Step</div>
     <div>
         <h3>@Step.Name</h3>
-        <div>@Step.Summary</div>
+        @if (Waiting)
+        {
+            <div>@About(Step.Step)</div>
+            <div class="recorded">
+                @(Locked ? $"Opens once step {Step.Step - 1} is saved." : _open ? "Assess this step below." : "Ready to assess.")
+            </div>
+        }
+        else
+        {
+            <div>@Step.Summary</div>
+        }
         @if (Step.RecordedBy is not null)
         {
             <div class="recorded">Assessed by @Step.RecordedBy @(Step.RecordedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "")</div>
         }
-        @if (Step.Details.Count > 0)
+        @if (!Waiting && Step.Details.Count > 0)
         {
             <ul>@foreach (var d in Step.Details) { <li>@d</li> }</ul>
         }
 
-        @if (_open)
+        @if (_open && !Locked)
         {
             <div class="step-body">
                 <div class="guide">
@@ -50,12 +60,12 @@
         }
     </div>
     <div style="text-align:right">
-        <Badge Text="@Step.Level" Css="@Display.LevelClass(Step.Level)" />
+        <Badge Text="@(Waiting ? (Locked ? "Locked" : "To do") : Step.Level)" Css="@(Waiting ? (Locked ? "b-neutral" : "b-info") : Display.LevelClass(Step.Level))" />
         @if (Step.Points != 0)
         {
             <div class="points" style="margin-top:6px">@Step.Points.ToString("+0.0;-0.0") pts</div>
         }
-        @if (!_open)
+        @if (!_open && !Locked)
         {
             <div style="margin-top:8px">
                 <button class="btn btn-sm" @onclick="Open">@(Step.RecordedBy is null ? "Assess" : "Change")</button>
@@ -69,6 +79,10 @@
     [Parameter, EditorRequired] public CaseDetailDto Case { get; set; } = default!;
     [Parameter, EditorRequired] public string Analyst { get; set; } = "";
     [Parameter] public bool StartOpen { get; set; }
+    /// <summary>Nobody (analyst or automation) has assessed this step yet.</summary>
+    [Parameter] public bool Waiting { get; set; }
+    /// <summary>Waiting, and an earlier step still needs assessing: steps open in order.</summary>
+    [Parameter] public bool Locked { get; set; }
     [Parameter] public EventCallback<string> OnSaved { get; set; }
 
     private static readonly (string Level, string Label)[] Levels =
@@ -102,6 +116,17 @@
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
     }
+
+    /// <summary>One line on what each step is about, shown while it waits to be assessed.</summary>
+    private static string About(int step) => step switch
+    {
+        1 => "Check the domain name for typosquatting, character swaps and brand spoofing.",
+        2 => "Check the domain's registration age, registrar and hosting provider.",
+        3 => "Check the page snapshot for a cloned brand page or a phishing kit.",
+        4 => "Check what happened when the sandbox entered dummy credentials.",
+        5 => "Check the SSL/TLS certificate's issuer and details.",
+        _ => ""
+    };
 
     /// <summary>The stakeholders' procedure for each step, shown next to the evidence.</summary>
     private static string[] Guidance(int step) => step switch

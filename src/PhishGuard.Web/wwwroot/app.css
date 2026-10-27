@@ -209,3 +209,7 @@ table.data td:first-child, table.data td.small.muted { white-space: nowrap; }
 .progress-dot { width: 22px; height: 6px; border-radius: 3px; background: var(--neutral-soft); }
 .progress-dot.done { background: var(--accent); }
 .recorded { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+.step.locked { opacity: .7; }
+.step.locked .step-num { background: var(--surface-2); }
+

@@ -182,7 +182,7 @@ public static class AnalystEndpoints
     }
 
     private static IReadOnlyList<StepFinding> PendingSteps() =>
-        CaseInvestigator.EvidenceSteps.Select(s => new StepFinding(s.Number, s.Name, FindingLevel.Unknown, 0, "Not investigated yet", []))
+        CaseInvestigator.EvidenceSteps.Select(s => new StepFinding(s.Number, s.Name, FindingLevel.Unknown, 0, CaseInvestigator.AwaitingAssessment, []))
             .Append(new StepFinding(6, CaseInvestigator.VerdictStepName, FindingLevel.Unknown, 0, "Not investigated yet", []))
             .Append(new StepFinding(7, CaseInvestigator.EnforcementStepName, FindingLevel.Unknown, 0, "Not investigated yet", []))
             .ToList();

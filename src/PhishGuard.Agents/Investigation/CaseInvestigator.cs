@@ -26,6 +26,9 @@ public sealed class CaseInvestigator(PhishGuardDbContext db, IEnumerable<IInvest
     ];
 
     public const string VerdictStepName = "Confirmation & triage verdict";
+
+    /// <summary>Summary of a step that has neither an automated implementation nor an analyst's assessment yet.</summary>
+    public const string AwaitingAssessment = "Waiting for analyst assessment";
     public const string EnforcementStepName = "Mitigation & enforcement";
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
@@ -48,7 +51,7 @@ public sealed class CaseInvestigator(PhishGuardDbContext db, IEnumerable<IInvest
             var step = _steps.FirstOrDefault(s => s.Number == number);
             findings.Add(byAnalyst.TryGetValue(number, out var manual) ? manual
                 : step is null
-                    ? new StepFinding(number, name, FindingLevel.Unknown, 0, "Not implemented yet", ["Assess this step on the case page, or add an IInvestigationStep with Number = " + number + "."])
+                    ? new StepFinding(number, name, FindingLevel.Unknown, 0, AwaitingAssessment, [])
                     : step.Run(context));
         }
 
@@ -120,7 +123,7 @@ public sealed class CaseInvestigator(PhishGuardDbContext db, IEnumerable<IInvest
         var reasons = findings.Where(f => f.Points != 0).OrderByDescending(f => Math.Abs(f.Points))
             .Select(f => $"step {f.Step} {f.Summary.ToLowerInvariant()} ({f.Points:+0.0;-0.0})").Take(3).ToList();
         var manual = findings.Count(f => f.RecordedBy is not null);
-        var automated = findings.Count(f => f.RecordedBy is null && f.Summary != "Not implemented yet");
+        var automated = findings.Count(f => f.RecordedBy is null && f.Summary != AwaitingAssessment && f.Summary != "Not implemented yet");
         var rationale = $"Model score {c.ModelProbability:P0} ({c.ModelBand} band, {modelPoints:+0.0;-0.0} points)"
                         + (reasons.Count > 0 ? "; " + string.Join("; ", reasons) : "")
                         + $". Evidence steps: {manual} assessed by an analyst, {automated} automated, {EvidenceSteps.Length - manual - automated} not done.";

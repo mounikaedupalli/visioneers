@@ -189,7 +189,7 @@ Every case the Scoring worker creates (Gray → `AgentReview`, or auto-`Confirme
 Until steps 1–5 are automated, analysts can perform them in the console. On the case page each of steps 1–5 shows
 **what to check** (the stakeholders' procedure), **the evidence for that step** (domain and brand, WHOIS, page
 snapshot, sandbox result, certificate) and an assessment: *Benign / Suspicious / Malicious / Not sure* with notes.
-The next unassessed step opens automatically, and a progress bar shows how many of the 5 are done.
+Steps open in order: a step that is still waiting shows what it is about and "Opens once step N is saved", and unlocks when the previous step is saved. A progress bar shows how many of the 5 are done.
 
 - `POST /api/cases/{id}/steps/{1-5}` with `{ "level": "Malicious", "analyst": "...", "notes": "..." }` stores the
   assessment in the case's audit trail (`AgentRuns`, with `RecordedBy`). An analyst's assessment of a step takes
