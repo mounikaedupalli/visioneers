@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -11,6 +11,7 @@ using PhishGuard.DataGen;
 //   dotnet run --project src/PhishGuard.DataGen -- [--count 500000] [--phish-rate 0.02] [--seed 42] [--days 14]
 //        [--reset] [--download-feeds] [--feeds-dir data/feeds] [--feed-share 0.3] [--csv data/urls.csv]
 //        [--new-campaign-rate 0.15]   (share of phishing URLs that start a new attacker campaign)
+//        [--difficulty normal|hard]   (hard adds look-alike benign cases, lure-free kits and kits reused across domains)
 
 var opts = Options.Parse(args);
 var config = new ConfigurationBuilder()
@@ -51,9 +52,10 @@ if (opts.DownloadFeeds)
 var tranco = FeedImporter.ReadTranco(opts.FeedsDir, top: 50_000).ToList();
 var feedUrls = FeedImporter.ReadPhishingFeeds(opts.FeedsDir).DistinctBy(f => f.Url).ToList();
 Console.WriteLine($"Feeds: {feedUrls.Count:N0} phishing URLs, {tranco.Count:N0} Tranco domains");
+Console.WriteLine($"Difficulty: {(opts.Hard ? "hard" : "normal")}");
 
 // 3. Generate
-var gen = new SyntheticUrlGenerator(opts.Seed, brands, tranco) { WindowDays = opts.Days, NewCampaignRate = opts.NewCampaignRate };
+var gen = new SyntheticUrlGenerator(opts.Seed, brands, tranco) { WindowDays = opts.Days, NewCampaignRate = opts.NewCampaignRate, Hard = opts.Hard };
 var rng = new Random(opts.Seed + 1);
 var phishingTarget = (int)Math.Round(opts.Count * opts.PhishRate);
 var benignTarget = opts.Count - phishingTarget;
@@ -61,11 +63,11 @@ var feedTarget = Math.Min(feedUrls.Count, (int)(phishingTarget * opts.FeedShare)
 
 var generated = new List<GeneratedUrl>(opts.Count);
 for (var i = 0; i < benignTarget; i++)
-    generated.Add(gen.Generate(gen.PickCategory(SyntheticUrlGenerator.BenignMix)));
+    generated.Add(gen.Generate(gen.PickCategory(gen.BenignCategories)));
 foreach (var (url, _) in feedUrls.OrderBy(_ => rng.Next()).Take(feedTarget))
     generated.Add(new GeneratedUrl(url, UrlCategory.FeedReal, GuessBrand(url, brands), DomainOwner.Attacker));
 for (var i = generated.Count - benignTarget; i < phishingTarget; i++)
-    generated.Add(gen.GeneratePhishing(gen.PickCategory(SyntheticUrlGenerator.PhishingMix)));
+    generated.Add(gen.GeneratePhishing(gen.PickCategory(gen.PhishingCategories)));
 
 // "Emerging tactics": homoglyph and encoded-long attacks only appear in the last third of the window,
 // so a time-based train/test split shows how the model copes with a tactic it hasn't seen.
@@ -140,7 +142,7 @@ static UrlSource SourceOf(string file) =>
     : file.StartsWith("urlhaus", StringComparison.OrdinalIgnoreCase) ? UrlSource.UrlHaus
     : UrlSource.Manual;
 
-internal sealed record Options(int Count, double PhishRate, int Seed, int Days, bool Reset, bool DownloadFeeds, string FeedsDir, double FeedShare, string? CsvPath, double NewCampaignRate)
+internal sealed record Options(int Count, double PhishRate, int Seed, int Days, bool Reset, bool DownloadFeeds, string FeedsDir, double FeedShare, string? CsvPath, double NewCampaignRate, bool Hard)
 {
     public static Options Parse(string[] args)
     {
@@ -156,6 +158,7 @@ internal sealed record Options(int Count, double PhishRate, int Seed, int Days, 
             FeedsDir: Get("--feeds-dir") ?? Path.Combine("data", "feeds"),
             FeedShare: double.Parse(Get("--feed-share") ?? "0.3", System.Globalization.CultureInfo.InvariantCulture),
             CsvPath: Get("--csv"),
-            NewCampaignRate: double.Parse(Get("--new-campaign-rate") ?? "0.15", System.Globalization.CultureInfo.InvariantCulture));
+            NewCampaignRate: double.Parse(Get("--new-campaign-rate") ?? "0.15", System.Globalization.CultureInfo.InvariantCulture),
+            Hard: (Get("--difficulty") ?? "normal").Equals("hard", StringComparison.OrdinalIgnoreCase));
     }
 }

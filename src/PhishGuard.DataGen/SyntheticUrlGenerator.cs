@@ -65,6 +65,29 @@ public sealed class SyntheticUrlGenerator
         (UrlCategory.IpHost, 5), (UrlCategory.CompromisedSite, 10), (UrlCategory.EncodedLongUrl, 6), (UrlCategory.Shortener, 3)
     ];
 
+    /// <summary>Extra benign cases in hard mode: they carry signals the normal dataset only gives to phishing.</summary>
+    public static readonly (UrlCategory Category, int Weight)[] HardBenignExtras =
+    [
+        (UrlCategory.BenignLoginPortal, 6), (UrlCategory.BenignLookalikeName, 3), (UrlCategory.BenignFreeHosting, 3)
+    ];
+
+    /// <summary>Extra phishing cases in hard mode.</summary>
+    public static readonly (UrlCategory Category, int Weight)[] HardPhishingExtras = [(UrlCategory.StealthKit, 10)];
+
+    /// <summary>
+    /// Hard mode (--difficulty hard): adds the benign/phishing extras above, gives half of all phishing kits
+    /// neutral paths instead of lure words, and rotates some campaigns across many domains (kit reuse).
+    /// The normal dataset is unchanged when this is off (same seed → same URLs).
+    /// </summary>
+    public bool Hard { get; init; }
+
+    public (UrlCategory Category, int Weight)[] BenignCategories => Hard ? [.. BenignMix, .. HardBenignExtras] : BenignMix;
+    public (UrlCategory Category, int Weight)[] PhishingCategories => Hard ? [.. PhishingMix, .. HardPhishingExtras] : PhishingMix;
+
+    /// <summary>Campaign types whose kit is copied onto fresh domains in hard mode.</summary>
+    private static readonly HashSet<UrlCategory> RotatingKits =
+        [UrlCategory.PathBrand, UrlCategory.CompromisedSite, UrlCategory.EncodedLongUrl, UrlCategory.StealthKit];
+
     public SyntheticUrlGenerator(int seed, IReadOnlyList<ProtectedBrand> brands, IEnumerable<string>? extraBenignDomains = null, int benignDomainPool = 20_000)
     {
         _rng = new Random(seed);
@@ -92,22 +115,27 @@ public sealed class SyntheticUrlGenerator
         UrlCategory.BenignCdn => Benign(category, CdnLink()),
         UrlCategory.BenignBrandSubdomain => BrandOwned(),
 
-        UrlCategory.Typosquat => WithBrand(category, b => $"{Scheme(0.7)}{Www(0.3)}{Typo(Keyword(b))}.{Pick(CheapTlds)}/{Pick(LurePaths)}{MaybeQuery(0.4)}", DomainOwner.Attacker),
-        UrlCategory.Homoglyph => WithBrand(category, b => $"https://{Homoglyph(Keyword(b))}.{Pick(["com", "net", "co", "org"])}/{Pick(LurePaths)}", DomainOwner.Attacker),
-        UrlCategory.Combosquat => WithBrand(category, b => $"{Scheme(0.8)}{Www(0.2)}{Combo(Keyword(b))}.{Pick(CheapTlds)}/{Pick(LurePaths)}{MaybeQuery(0.4)}", DomainOwner.Attacker),
-        UrlCategory.SubdomainBrand => WithBrand(category, b => $"{Scheme(0.8)}{SubdomainTrick(b)}/{Pick(LurePaths)}", DomainOwner.Attacker),
-        UrlCategory.PathBrand => WithBrand(category, b => $"{Scheme(0.6)}{RandomAttackerDomain()}/{Keyword(b)}/{Pick(LurePaths)}{MaybeQuery(0.5)}", DomainOwner.Attacker),
+        UrlCategory.Typosquat => WithBrand(category, b => $"{Scheme(0.7)}{Www(0.3)}{Typo(Keyword(b))}.{Pick(CheapTlds)}/{KitPath()}{MaybeQuery(0.4)}", DomainOwner.Attacker),
+        UrlCategory.Homoglyph => WithBrand(category, b => $"https://{Homoglyph(Keyword(b))}.{Pick(["com", "net", "co", "org"])}/{KitPath()}", DomainOwner.Attacker),
+        UrlCategory.Combosquat => WithBrand(category, b => $"{Scheme(0.8)}{Www(0.2)}{Combo(Keyword(b))}.{Pick(CheapTlds)}/{KitPath()}{MaybeQuery(0.4)}", DomainOwner.Attacker),
+        UrlCategory.SubdomainBrand => WithBrand(category, b => $"{Scheme(0.8)}{SubdomainTrick(b)}/{KitPath()}", DomainOwner.Attacker),
+        UrlCategory.PathBrand => WithBrand(category, b => $"{Scheme(0.6)}{RandomAttackerDomain()}/{Keyword(b)}/{KitPath()}{MaybeQuery(0.5)}", DomainOwner.Attacker),
         UrlCategory.FreeHosting => WithBrand(category, FreeHosted, DomainOwner.AttackerOnPlatform),
         UrlCategory.OpenRedirect => WithBrand(category, OpenRedirect, DomainOwner.Legit),
-        UrlCategory.UserInfoTrick => WithBrand(category, b => $"http://{Www(0.5)}{b.PrimaryDomain}{Pick(["", "-secure", "-login"])}@{(_rng.NextDouble() < 0.5 ? Ip() : RandomAttackerDomain())}/{Pick(LurePaths)}", DomainOwner.Attacker),
-        UrlCategory.IpHost => WithBrand(category, b => $"http://{Ip()}{(_rng.NextDouble() < 0.3 ? ":" + Pick(["8080", "8443", "2096", "8888"]) : "")}/{Keyword(b)}/{Pick(LurePaths)}", DomainOwner.Attacker),
+        UrlCategory.UserInfoTrick => WithBrand(category, b => $"http://{Www(0.5)}{b.PrimaryDomain}{Pick(["", "-secure", "-login"])}@{(_rng.NextDouble() < 0.5 ? Ip() : RandomAttackerDomain())}/{KitPath()}", DomainOwner.Attacker),
+        UrlCategory.IpHost => WithBrand(category, b => $"http://{Ip()}{(_rng.NextDouble() < 0.3 ? ":" + Pick(["8080", "8443", "2096", "8888"]) : "")}/{Keyword(b)}/{KitPath()}", DomainOwner.Attacker),
         UrlCategory.CompromisedSite => WithBrand(category, Compromised, DomainOwner.Compromised),
         UrlCategory.EncodedLongUrl => WithBrand(category, EncodedLong, DomainOwner.Attacker),
         UrlCategory.Shortener => WithBrand(category, _ => $"https://{Pick(Shorteners)}/{Token(6, 8, alnum: true)}", DomainOwner.Legit),
+
+        // hard mode
+        UrlCategory.BenignLoginPortal => Benign(category, $"https://{Pick(["portal", "my", "account", "secure", "login", "app", "members"])}.{Pick(_benignDomains)}/{Pick(BenignLoginPaths)}{MaybeQuery(0.5)}"),
+        UrlCategory.BenignLookalikeName => Benign(category, $"{Scheme(0.9)}{Www()}{Pick(LookalikeWords)}{Pick(Nouns)}.{Pick(BenignTlds)}/{Path(0, 3)}{MaybeQuery(0.3)}"),
+        UrlCategory.BenignFreeHosting => Benign(category, $"https://{Pick(Nouns)}-{Pick(Nouns)}{(_rng.NextDouble() < 0.5 ? _rng.Next(1, 99).ToString() : "")}.{Pick(FreeHostSuffixes)}/{Path(0, 2)}"),
+        UrlCategory.StealthKit => WithBrand(category, _ => $"https://{Www(0.5)}{RandomBusinessDomain()}/{Pick(NeutralPaths)}{MaybeQuery(0.4)}", DomainOwner.Attacker),
         _ => throw new ArgumentOutOfRangeException(nameof(category), category, "Not a synthetic category")
     };
 
-    /// <summary>Benign short links too, so "is a shortener" alone can't be a perfect phishing signal.</summary>
     /// <summary>
     /// A phishing URL that usually belongs to an existing attacker campaign: same registered domain and kit
     /// path, different per-victim token. Campaigns are picked in proportion to their size (a Chinese-restaurant
@@ -146,17 +174,32 @@ public sealed class SyntheticUrlGenerator
         };
     }
 
-    /// <summary>Same host and kit path, new victim: shorteners get a new code, everything else a new tracking token.</summary>
+    /// <summary>
+    /// Same host and kit path, new victim: shorteners get a new code, everything else a new tracking token.
+    /// In hard mode some kits are also redeployed on a fresh domain (same path), as real kits are.
+    /// </summary>
     private string Variant(AttackCampaign c)
     {
         var url = c.Template.Url;
         if (c.Template.Category == UrlCategory.Shortener)
             return url[..(url.LastIndexOf('/') + 1)] + Token(6, 8, alnum: true);
 
-        var variant = $"{url}{(url.Contains('?') ? '&' : '?')}{c.VictimParam}={Token(8, 20, alnum: true)}";
+        if (Hard && RotatingKits.Contains(c.Template.Category) && _rng.NextDouble() < 0.3 &&
+            Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            var freshHost = c.Template.Category == UrlCategory.CompromisedSite ? CompromisedSiteName() : RandomAttackerDomain();
+            var at = url.IndexOf(uri.Host, StringComparison.OrdinalIgnoreCase);
+            if (at >= 0) url = url[..at] + freshHost + url[(at + uri.Host.Length)..];
+        }
+
+        // Hard mode: victim tokens look like ordinary query strings (same names/lengths as benign MaybeQuery).
+        var param = Hard ? Pick(["id", "ref", "lang", "page", "session", "src", "q", "sort"]) : c.VictimParam;
+        var token = Hard ? Token(2, 12, alnum: true) : Token(8, 20, alnum: true);
+        var variant = $"{url}{(url.Contains('?') ? '&' : '?')}{param}={token}";
         return variant.Length > 256 && url.Length <= 256 ? variant[..256] : variant;
     }
 
+    /// <summary>Benign short links too, so "is a shortener" alone can't be a perfect phishing signal.</summary>
     public GeneratedUrl BenignShortLink() =>
         Benign(UrlCategory.BenignTracking, $"https://{Pick(Shorteners)}/{Token(6, 8, alnum: true)}");
 
@@ -281,13 +324,13 @@ public sealed class SyntheticUrlGenerator
             0 => $"https://sites.google.com/view/{k}-{Pick(LureWords)}-{Token(4, 6, alnum: true).ToLowerInvariant()}",
             1 => $"https://{Pick(Nouns)}{_rng.Next(100, 9999)}.blob.core.windows.net/$web/{k}/{Pick(["index.html", "login.html", "verify.html"])}",
             2 => $"https://ipfs.io/ipfs/{Token(46, 46, alnum: true)}?filename={k}-{Pick(LureWords)}.html",
-            _ => $"https://{k}-{Pick(LureWords)}-{Token(4, 6, alnum: true).ToLowerInvariant()}.{Pick(FreeHostSuffixes)}/{Pick(LurePaths)}"
+            _ => $"https://{k}-{Pick(LureWords)}-{Token(4, 6, alnum: true).ToLowerInvariant()}.{Pick(FreeHostSuffixes)}/{KitPath()}"
         };
     }
 
     private string OpenRedirect(ProtectedBrand b)
     {
-        var target = Uri.EscapeDataString($"https://{Combo(Keyword(b))}.{Pick(CheapTlds)}/{Pick(LurePaths)}");
+        var target = Uri.EscapeDataString($"https://{Combo(Keyword(b))}.{Pick(CheapTlds)}/{KitPath()}");
         return _rng.Next(4) switch
         {
             0 => $"https://www.google.com/url?q={target}&sa=D&source=editors&ust={Digits(16)}&usg={Token(28, 28)}",
@@ -299,14 +342,14 @@ public sealed class SyntheticUrlGenerator
 
     private string Compromised(ProtectedBrand b)
     {
-        var site = $"{Pick(Nouns)}{Pick(Nouns)}{Pick(["", "llc", "co", "inc"])}.{Pick(BenignTlds)}";
+        var site = CompromisedSiteName();
         var k = Keyword(b);
         return _rng.Next(4) switch
         {
-            0 => $"https://{Www(0.6)}{site}/wp-content/plugins/{Pick(Nouns)}/{k}/{Pick(LurePaths)}",
+            0 => $"https://{Www(0.6)}{site}/wp-content/plugins/{Pick(Nouns)}/{k}/{KitPath()}",
             1 => $"https://{Www(0.6)}{site}/wp-includes/js/{Token(6, 10, alnum: true).ToLowerInvariant()}/{k}/index.php",
-            2 => $"https://{Www(0.6)}{site}/.well-known/pki-validation/{k}/{Pick(LurePaths)}",
-            _ => $"http://{site}/images/{Pick(PathWords)}/{k}-{Pick(LureWords)}/{Pick(LurePaths)}"
+            2 => $"https://{Www(0.6)}{site}/.well-known/pki-validation/{k}/{KitPath()}",
+            _ => $"http://{site}/images/{Pick(PathWords)}/{k}-{Pick(LureWords)}/{KitPath()}"
         };
     }
 
@@ -314,13 +357,18 @@ public sealed class SyntheticUrlGenerator
     {
         var email = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Pick(Nouns)}.{Pick(Nouns)}@{Pick(_benignDomains)}"));
         var host = _rng.NextDouble() < 0.5 ? $"{Combo(Keyword(b))}.{Pick(CheapTlds)}" : RandomAttackerDomain();
-        var sb = new StringBuilder($"https://{host}/{Token(30, 60)}/{Pick(LurePaths)}?{Pick(["email", "e", "login_hint", "user"])}={email}&token={Token(20, 40)}");
+        var sb = new StringBuilder($"https://{host}/{Token(30, 60)}/{KitPath()}?{Pick(["email", "e", "login_hint", "user"])}={email}&token={Token(20, 40)}");
         var targetLength = _rng.Next(190, 257);
         while (sb.Length < targetLength) sb.Append($"&{Pick(["sid", "r", "k", "x", "data"])}={Token(8, 24)}");
         return sb.Length > 256 ? sb.ToString(0, 256) : sb.ToString();
     }
 
     // ---------------- helpers ----------------
+
+    /// <summary>Kit landing path: always a lure path normally; in hard mode half the kits use a neutral path.</summary>
+    private string KitPath() => Hard && _rng.NextDouble() < 0.5 ? Pick(NeutralPaths) : Pick(LurePaths);
+
+    private string CompromisedSiteName() => $"{Pick(Nouns)}{Pick(Nouns)}{Pick(["", "llc", "co", "inc"])}.{Pick(BenignTlds)}";
 
     private string Keyword(ProtectedBrand b) => b.Keywords.Split(',')[_rng.NextDouble() < 0.8 ? 0 : _rng.Next(b.Keywords.Split(',').Length)].Trim();
 
